@@ -1,0 +1,35 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.pytest_cache/
+.ruff_cache/
+
+# --- ML data & artifacts (large/generated, not tracked) ---
+ml/data/raw/*
+ml/data/processed/*
+!ml/data/raw/.gitkeep
+!ml/data/processed/.gitkeep
+ml/models/*.pkl
+ml/models/*.joblib
+ml/models/*.onnx
+
+# --- Node / React ---
+node_modules/
+dashboard/dist/
+dashboard/build/
+
+# --- Database ---
+*.sqlite3
+*.db
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+.DS_Store
+
+# --- Logs ---
+*.log

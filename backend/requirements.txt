@@ -1,0 +1,12 @@
+# Serving dependencies (what actually ships in the deployed API container)
+fastapi
+uvicorn[standard]
+pydantic
+sqlalchemy
+python-dotenv
+tldextract
+
+# Needed to load and run the exported model artifact
+scikit-learn
+xgboost
+joblib

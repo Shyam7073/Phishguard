@@ -1,0 +1,5 @@
+# Shared dev tooling for local work across ml/ and backend/
+pytest
+httpx        # needed by FastAPI's TestClient
+black
+ruff

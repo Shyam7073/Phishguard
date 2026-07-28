@@ -1,0 +1,9 @@
+# Offline training pipeline dependencies (not needed by the deployed backend)
+pandas
+numpy
+scikit-learn
+xgboost
+joblib
+tldextract
+matplotlib
+seaborn

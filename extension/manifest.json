@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "PhishGuard",
+  "version": "1.0.0",
+  "description": "Scans the page you're viewing for phishing using a locally-trained ML model.",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": ["http://127.0.0.1:8000/*", "http://localhost:8000/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "PhishGuard"
+  }
+}

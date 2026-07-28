@@ -1,0 +1,41 @@
+body {
+  width: 260px;
+  font-family: system-ui, sans-serif;
+  padding: 12px;
+  margin: 0;
+}
+
+h1 {
+  font-size: 16px;
+  margin: 0 0 8px;
+}
+
+#status {
+  font-size: 18px;
+  font-weight: 600;
+  padding: 8px;
+  border-radius: 6px;
+  text-align: center;
+}
+
+#status.safe {
+  background: #e6f4ea;
+  color: #1e7e34;
+}
+
+#status.danger {
+  background: #fdecea;
+  color: #c62828;
+}
+
+#status.unknown {
+  background: #f1f3f4;
+  color: #5f6368;
+}
+
+#details {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #5f6368;
+  word-break: break-word;
+}
