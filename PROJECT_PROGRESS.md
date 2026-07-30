@@ -1,6 +1,6 @@
 # PhishGuard — Project Progress
 
-Last updated: 2026-07-28
+Last updated: 2026-07-31 (end of day)
 
 ## Completed milestones
 
@@ -193,6 +193,120 @@ Last updated: 2026-07-28
   (a URL lexically shaped like a phishing link) produced "⚠ Likely
   phishing" at 98.5% confidence, both matching what the backend returned.
 
+- **Milestone 8 — React Dashboard.** `dashboard/` is a Vite + React 19 app
+  styled with Tailwind CSS v4 (`@tailwindcss/vite` plugin, no config file
+  needed — v4 is CSS-first). Three components, all reading from the same
+  backend the extension already talks to:
+  - `HistoryTable` — `GET /history?limit=100`, most-recent-first, with a
+    verdict badge (colored dot + label, never color alone), confidence
+    percentage, and a formatted timestamp. Shows an empty state ("No scans
+    yet...") rather than a blank table when history is empty.
+  - `VerdictBarChart` — a small horizontal bar chart comparing legitimate
+    vs phishing counts. Built by hand in plain HTML/CSS (no charting
+    library — two bars didn't justify one), following the project's
+    dataviz skill: status colors (`good` #0ca30c / `critical` #d03b3b,
+    the fixed, never-themed status palette) rather than arbitrary
+    categorical hues, since "legitimate vs phishing" is a status
+    distinction, not series identity; 4px rounded data-end/square baseline
+    bar spec; identity carried by icon-dot + direct label, never color
+    alone.
+  - `StatTiles` — four stat tiles (total scans, legitimate, phishing,
+    phishing rate) above the chart.
+  - `ExportButton` — plain `<a href=".../reports" download>`, no JS needed
+    since the backend already sets `Content-Disposition: attachment`.
+
+  App-level state is a single `fetchHistory()` call on mount plus a manual
+  Refresh button — no polling, no global state library; this is a
+  single-page read-only dashboard, not an app with writes to synchronize.
+
+  **Dependency snag hit and fixed:** `npm create vite@latest` now scaffolds
+  with Vite 8, which ships a Rust/rolldown bundler core requiring Node
+  `^20.19`/`>=22.12`; on this machine's Node v20.12.2 the native
+  `@rolldown/binding-darwin-arm64` binding failed to load and `vite build`
+  crashed outright. Fixed by pinning back to `vite@^5.4.20` +
+  `@vitejs/plugin-react@^4` (the classic esbuild/rollup Vite, well past
+  stable) — worth revisiting if the dev machine's Node is ever upgraded
+  past 20.19.
+
+  **Manually smoke-tested against the real running backend** (not just a
+  build check): started both `python -m uvicorn backend.app.main:app` and
+  `npm run dev`, seeded a handful of real `/scan` calls (a legitimate
+  Google search URL, a fake PayPal-lookalike, an IP-address login URL,
+  `mail.google.com`, `github.com/anthropics`), loaded the dashboard in
+  Chrome, and confirmed the stat tiles, bar chart, and table all rendered
+  and updated correctly on Refresh. Also clicked Export CSV for real and
+  confirmed the downloaded file matched what `/reports` returns.
+  **Bonus confirmation, not a dashboard bug:** the Chrome extension from
+  Milestone 7 is still loaded in this browser, and its background worker
+  scanned the dashboard's own `http://localhost:5173/` tab on navigation —
+  visible as an extra row in the history table. That's expected behavior
+  (the extension scans every `http(s)` navigation, dashboard included),
+  not something to fix, but worth remembering when taking demo
+  screenshots (either unload the extension first, or expect a
+  `localhost:5173` row to show up).
+
+- **Milestone 8 follow-up — model false-positive investigation & fix.**
+  The `mail.google.com`/`github.com/anthropics` false positives surfaced
+  above turned out to be three separate instances of the same root cause
+  (synthetic legit-URL generation not covering the real range of a
+  feature), confirmed with per-feature evidence each time rather than
+  guessed at:
+
+  1. **`num_slashes` >= 6 was 0% of legit training rows** (the old 20
+     literal `PATH_TEMPLATES` topped out at 3 path segments) vs ~12% of
+     real phishing rows -- XGBoost learned "deep path -> certainly
+     phishing" and misfired on `mail.google.com/mail/u/0/` and
+     `docs.google.com/document/d/.../edit`.
+  2. A first fix attempt (add more literal deep-path template strings)
+     only partially worked -- `https://twitter.com/anthropicai` still
+     misfired, and XGBoost's per-feature contribution (via
+     `booster.predict(..., pred_contribs=True)`) showed `path_length`
+     alone contributing +8 toward phishing. A **fixed list of literal
+     strings, no matter how many, only ever produces a handful of exact
+     `path_length` values** -- real usernames/slugs/IDs vary in length
+     every time. Replaced the literal template list with a small
+     compositional generator (`_random_path`/`_random_segment` in
+     `ml/prepare_dataset.py`): random path depth (weighted shallow but
+     with a real tail into deep routes) built from either a common route
+     word, a hyphen/underscore-joined multi-word slug, or a variable-length
+     random alphanumeric token -- giving `path_length` and `num_slashes` a
+     smooth, continuous distribution instead of discrete gaps.
+  3. That generator itself introduced a *new*, opposite-direction
+     artifact: query strings were attached 60% of the time, but real
+     PhishTank phishing URLs have **no** query string ~84% of the time --
+     so `num_query_params == 0` ended up more associated with phishing
+     than legit, inverting the intended signal. Fixed by making "no query
+     string" the ~80% common case for legit too (matching PhishTank's
+     real rate) rather than picking an arbitrary ratio.
+
+  After each fix, ran a **systematic audit** (not just re-testing the same
+  hand-picked URLs): for every feature, find any value that appears in
+  >=0.5% of phishing training rows but 0% of legit training rows -- the
+  exact shape of the bug each time. That caught two more real gaps
+  (`num_underscores` and 2-level subdomains/`num_dots` >= 5) and confirmed
+  the rest of the remaining gaps are either sampling noise on
+  high-cardinality features or deliberate, defensible signals (`@`
+  symbol, `is_https`, known URL shorteners are genuinely near-absent in
+  legitimate URLs and shouldn't be forced into the synthetic data).
+
+  **Result:** XGBoost accuracy moved from 96.51% to **94.08%** (precision
+  0.9510 / recall 0.9295 / F1 0.9401) -- a *drop*, and that's expected and
+  correct: the earlier, higher number was inflated by the same class of
+  synthetic-data shortcut caught twice already in Milestone 4. Feature
+  importances now read as genuine phishing indicators (`is_https` 20.7%,
+  `num_digits` 18.2%, `is_url_shortener` 10.4%, `has_at_symbol` 7.6%)
+  rather than an artifact dominating (previously `num_slashes` alone was
+  23%). All 18 existing unit tests still pass unmodified (they test
+  `ml/features.py`, which wasn't touched). Re-tested against 15 hand-picked
+  real legitimate URLs and 7 real-shaped phishing URLs: phishing recall
+  held at 7/7, and legit false positives dropped from confidently-wrong
+  (99%+) to either fixed outright or borderline-uncertain (55-65%) for a
+  residual few bare-domain-plus-generic-path cases (`github.com/anthropics`,
+  `linkedin.com/in/...`) -- a genuine, honestly-reported limitation of a
+  17-feature lexical-only classifier (no domain age/reputation/whois
+  signal), not a data artifact, and not worth chasing further by hand-
+  tuning synthetic data to specific adversarial examples.
+
 ## Current project status
 
 Repo is scaffolded, local dev environment is fully working, a clean labeled
@@ -204,23 +318,80 @@ the FastAPI backend serves real verdicts end-to-end via `POST /scan`,
 persists them to SQLite, and exposes them via `GET /history` and `GET
 /reports` (CSV), and the Chrome extension (Manifest V3) scans on
 navigation and shows a verdict popup — verified working against the real
-backend in an actual loaded Chrome extension, not just unit tests.
+backend in an actual loaded Chrome extension, not just unit tests. The
+React dashboard (`dashboard/`, Vite + React 19 + Tailwind v4) reads
+`/history` for a scan table, a hand-built verdict-breakdown bar chart, and
+stat tiles, plus a one-click CSV export — smoke-tested end to end against
+the real backend and a real loaded extension in the same browser.
 Application code so far: `ml/prepare_dataset.py`, `ml/features.py`,
 `ml/train.py`, `ml/tests/test_features.py`; the full `backend/app/`
 package (`main.py`, `api/{scan,history,reports}.py`,
 `schemas/{scan,history}.py`, `ml_service/predictor.py`,
 `db/{database,models}.py`) with `backend/tests/` (`conftest.py`,
-`test_scan.py`, `test_history.py`, 18 tests total); and
-`extension/` (`manifest.json`, `background.js`, `popup/`). Nothing has
-been committed to git yet (working tree has untracked files only, by
-design — commits are left to you).
+`test_scan.py`, `test_history.py`, 18 tests total); `extension/`
+(`manifest.json`, `background.js`, `popup/`); and `dashboard/src/`
+(`App.jsx`, `api.js`, `components/{StatTiles,VerdictBarChart,
+HistoryTable,ExportButton}.jsx`).
+
+- **Milestone 8 extension re-test (2026-07-31).** After the false-positive
+  fix above, re-verified through the *actual loaded Chrome extension*
+  (not just direct model calls) — confirmed the extension itself needed
+  no changes (it only calls `/scan`; the model lives entirely server-side,
+  so only the backend needed a restart to load the retrained
+  `model.joblib`). Three real navigations tested: `github.com/anthropics`
+  (83.8% phishing through the real extension, matching the direct-model
+  test exactly — the known residual case, see below), a real live Reddit
+  thread URL (99.9% legit — previously a false positive, confirmed fixed
+  on genuine traffic, not just the synthetic test string), and a fake
+  PayPal phishing URL (99.98% phishing — confirms recall wasn't
+  collateral damage from the retrain).
+
+- **Decision, 2026-07-31: partially reversing the "pure ML classifier, no
+  threat-intel" call from decision 8 below.** The `github.com/anthropics`-
+  style residual false positives (documented above as "a genuine ceiling
+  of a lexical-only classifier") are real and the user wants to address
+  them with more than dataset tuning. Options compared:
+  - **Typosquat/brand-similarity feature** (edit-distance from a domain to
+    a curated list of well-known brands) — offline, no network call, stays
+    inside the existing `ml/features.py` pattern. Cheapest, and directly
+    targets exactly the blind spot found (a lexical-only model can't tell
+    "this domain impersonates a brand" or, conversely, "this domain *is*
+    the brand" without an explicit similarity check).
+  - **URLhaus vs VirusTotal vs Google Safe Browsing** (live blocklist
+    checks) — URLhaus picked as easiest: no account/API key needed for
+    basic lookups, single `POST`/immediate JSON, no meaningful rate limit
+    for real-time browsing. VirusTotal's free tier (~4 req/min) is too
+    tight for a "scans every page" use case. Google Safe Browsing (10k/day
+    free, same blocklist Chrome uses) was noted as a strong alternative if
+    more polish/name-recognition is wanted later, but needs a Google Cloud
+    API key vs URLhaus's zero setup.
+  - **WHOIS domain age** (`python-whois`) — the signal most directly
+    relevant to the `github.com`-style gap (old, reputable domain vs a
+    lexically-similar-looking new one), but it's a live, sometimes-slow,
+    inconsistently-formatted network call — deliberately sequenced last,
+    added once the multi-signal combine/fallback logic already exists.
+  - Rejected for now: fetching page content/DOM (form actions, password
+    fields) and favicon/visual-similarity hashing — both meaningfully
+    more complex (safe fetching of arbitrary/possibly-malicious pages,
+    image hashing + a brand-favicon database) for the correctness gained
+    relative to the options above.
+
+  **The plan is not just to bolt these on independently but to combine
+  them into one explainable multi-signal verdict** (ML score + typosquat
+  flag + blocklist hit, shown with *why*, not one raw confidence number)
+  — the bigger value-add, and it directly fixes today's binary-verdict
+  problem (a borderline ML score plus "not on any blocklist" plus "no
+  brand-name match" reads very differently from a borderline score alone).
 
 ## Next milestone
 
-**Milestone 8 — React Dashboard**: scan history table, one simple stats
-chart, and a report export button — talking to the same backend
-(`/history`, `/reports`) the extension uses, now that CORS is already
-enabled.
+**Milestone 10 — Typosquat feature + URLhaus threat intel** (in progress,
+starting 2026-08-01): typosquat/brand-similarity feature in
+`ml/features.py` + retrain; URLhaus blocklist check called from `/scan`
+(requires making `/scan` async with a timeout and a graceful fallback to
+ML-only if the call fails); combine both signals with the ML score into
+one explainable verdict. WHOIS domain age and the final README/deployment
+polish come after. See `TODO.md` for the concrete task breakdown.
 
 ## Important design decisions made today
 
@@ -255,9 +426,15 @@ enabled.
    Dropping threat intel removes API keys, rate limits, async retry logic,
    and a caching layer — all real engineering, but not essential to the core
    "ML classifies a URL" story. `backend/app/threat_intel/` scaffold folder
-   removed accordingly. Can be re-added later as a stretch goal if time
-   allows, since the architecture (verdict returned by `/scan`) doesn't
-   preclude it.
+   removed accordingly.
+   **Partially reversed 2026-07-31** (see Milestone 10 above) — the
+   false-positive investigation surfaced a genuine, honestly-documented
+   ceiling for a lexical-only model, and the user decided the project
+   should be "more than just an ML model." URLhaus (not VirusTotal) is
+   going back in, plus a typosquat feature and (later) WHOIS domain age.
+   Docker/deployment (the rest of what "Milestone 9" originally meant)
+   is explicitly still out of scope — this reversal is about detection
+   depth, not deployment infra.
 
 ## Reference
 

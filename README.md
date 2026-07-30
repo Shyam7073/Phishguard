@@ -1,8 +1,8 @@
 # PhishGuard
 
 A phishing URL detection system that analyzes visited URLs in real time using
-a machine learning model, cross-referenced with VirusTotal and URLHaus threat
-intelligence, surfaced through a Chrome extension and a React dashboard.
+a machine learning model, surfaced through a Chrome extension and a React
+dashboard.
 
 ## Architecture
 
@@ -37,8 +37,8 @@ easy to reason about and explain end to end.
 - [x] Milestone 5 — Backend core (`/scan`)
 - [x] Milestone 6 — Persistence layer (`/history`, `/reports`)
 - [x] Milestone 7 — Chrome extension MVP
-- [ ] Milestone 8 — React dashboard
-- [ ] Milestone 9 — Polish & deployment
+- [x] Milestone 8 — React dashboard
+- [ ] Final polish (README/screenshots) — no Docker/deployment planned, keeping this a local-run resume project
 
 ## Local setup
 
@@ -67,4 +67,14 @@ Load the Chrome extension: with the backend running, open
 `chrome://extensions`, enable **Developer mode**, click **Load unpacked**,
 and select the `extension/` folder. See `extension/README.md` for details.
 
-Setup instructions for the dashboard will be added once that milestone lands.
+Run the dashboard (with the backend running at `127.0.0.1:8000`):
+
+```bash
+cd dashboard
+npm install
+npm run dev
+```
+
+Then open the printed `localhost` URL. The dashboard shows scan history, a
+legitimate-vs-phishing breakdown, and a CSV export button, all backed by the
+same `/history` and `/reports` endpoints the extension uses.
