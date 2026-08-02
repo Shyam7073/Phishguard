@@ -1,6 +1,206 @@
 # PhishGuard — Project Progress
 
-Last updated: 2026-07-31 (end of day)
+Last updated: 2026-08-03
+
+## Milestone 13 — RDAP domain-age signal (done, 2026-08-03)
+
+The last open item from Milestone 8's false-positive investigation was a
+small, honestly-documented ceiling: a handful of legitimate URLs
+(`github.com/anthropics` ~80% phishing, `twitter.com/anthropicai` ~55%)
+stayed borderline/wrong no matter how the synthetic dataset was tuned,
+because a 17-feature lexical-only model has no way to know a domain is
+old and reputable versus a lookalike registered last week. This milestone
+adds that missing signal.
+
+**Why RDAP, not raw WHOIS**: researched both before building. Raw WHOIS is
+a plain-text protocol with no fixed schema -- every registrar/TLD formats
+its response differently, so reliably parsing a creation date out of free
+text needs per-registrar handling. RDAP (the ICANN-mandated JSON successor
+to WHOIS) returns the same structured fields regardless of registry, which
+directly removes that parsing burden. Trade-off checked and accepted:
+RDAP coverage is strong for gTLDs (~85%+, and mandatory for `.com`/`.org`/
+`.net`) but patchier for ccTLDs (~40-60%, some like `.de`/`.cn`/`.jp` still
+WHOIS-only) -- acceptable since phishing overwhelmingly targets brands on
+gTLDs, and the existing "unknown" fallback pattern already handles the
+rest gracefully.
+
+**Design**: `backend/app/threat_intel/domain_age.py` looks up a domain's
+RDAP creation date via the `whodap` library and buckets the result into
+`domain_age_status`: "new" (<30 days), "moderate", "established" (>=365
+days), or "unknown" (lookup failed/unsupported TLD). `backend/app/
+verdict.py` folds this into the combined verdict with a deliberately
+**asymmetric** rule, following the same asymmetry principle URLhaus already
+established (a positive hit overrides, an absence of evidence doesn't
+invert):
+- An **established** domain overrides a *borderline* ML phishing call
+  (probability < 0.9, `ESTABLISHED_OVERRIDE_CEILING`) to legitimate --
+  this is the fix. A genuinely confident ML phishing score (>=90%) is
+  *not* overridden just because the domain is old, so a compromised or
+  deliberately aged old domain hosting real phishing is still caught.
+- A **new** domain does *not* auto-flip a confidently-legit ML call to
+  phishing -- deliberately asymmetric, to avoid introducing a fresh class
+  of false positives on genuinely new legitimate sites (personal pages,
+  startups), which are common and untested here. It's only noted in the
+  reason text for a human to weigh, not acted on automatically.
+
+**Two real snags hit and fixed during live testing** (mocked tests didn't
+catch either, since they don't touch the real RDAP network path):
+1. Some registries return a naive `datetime` (no tzinfo) for `created_date`
+   -- crashed `(datetime.now(timezone.utc) - creation_date)` with a
+   `TypeError` on `twitter.com`'s real RDAP response, even though
+   `google.com`'s worked fine. Fixed by assuming UTC when tzinfo is absent.
+2. `whodap.aio_lookup_domain()` re-fetches IANA's RDAP bootstrap registry
+   (a second network round trip, to find which RDAP server owns a given
+   TLD) on *every single call* -- this alone pushed real lookups for both
+   `github.com` and `twitter.com` past a 4-second timeout in back-to-back
+   live testing. Fixed by caching one `whodap.DNSClient` at module level
+   (bootstrap fetched once, lazily, on first use) so every call after the
+   first is a single RDAP round trip -- same *shape* of fix as URLhaus's
+   cold-connection timeout bump in Milestone 10a (a live smoke test catching
+   something mocked tests structurally can't), but the actual fix here was
+   eliminating redundant work rather than just raising a number.
+
+**Result, verified live end-to-end against the real backend** (not just
+mocked tests): `github.com/anthropics` -- ML score 80.2% phishing, RDAP age
+6872 days (~18.8 years) -- **rescued to legitimate**, reason: "ML model
+flagged this, but the domain is long-established — likely a false
+positive". `twitter.com/anthropicai` -- ML 55.5% phishing, RDAP age 9690
+days (~26.5 years) -- **also rescued**, resolving the last open residual
+case from Milestone 8/11/12. Fake PayPal phishing URL -- still 99.7%
+phishing, RDAP unavailable for that domain as expected, confirms recall is
+untouched. Real Google search URL -- RDAP age 10548 days, correctly stayed
+legitimate. Dashboard's `HistoryTable` gained a "Domain age" column
+(colored dot + `Nd (status)` label, same status-color convention as the
+other badges), confirmed rendering correctly in a real browser against the
+real backend. Extension popup gained the same badge in code but still
+needs the user's manual visual confirmation (known `chrome-extension://`
+browser-automation limitation, same as every previous extension change).
+
+**Testing**: 4 new tests added via monkeypatching `scan_module.predict`
+and `scan_module.check_domain_age` (established-domain rescues a borderline
+call, established-but-confident-phishing is *not* rescued, new-domain is
+annotated but not auto-flagged, unknown-domain-age is noted in the reason)
+-- no real RDAP network calls in the suite, same pattern as URLhaus's
+mocked "listed"/"unknown" tests. 24/24 tests passing. `backend/phishguard.db`
+migrated in place via `ALTER TABLE` (all 131 pre-existing rows preserved,
+same approach as Milestone 10b).
+
+## Milestone 12 — real-world false positive fix: long tracking-param URLs (done, 2026-08-01)
+
+User reported a second real false positive right after Milestone 11: a real
+Google search URL typed into Chrome's address bar
+(`https://www.google.com/search?q=codeshef&rlz=...&gs_lcrp=...&sourceid=chrome&...`,
+317 chars) scored **99.9996% phishing**. Diagnosed via contribution
+analysis: `url_length` alone contributed +5.83, the dominant driver by far.
+Root cause, confirmed by checking the actual training distribution: legit
+synthetic URLs **never exceeded 213 characters** (zero rows past 250) while
+phishing had real coverage there (1.03%) -- any legit URL that happened to
+be long, which every single browser-address-bar search is, was guaranteed
+to be misclassified with high confidence, because the model had literally
+never seen a legit example that long. Same root cause class as Milestone 11
+(synthetic data not matching real browsing), but broader-impact: long
+tracking/analytics query strings are extremely common in everyday
+legitimate browsing (any search engine, e-commerce filters, OAuth
+redirects), not a rare edge case.
+
+**Fix**: added `_tracking_blob()` to `ml/prepare_dataset.py` -- one to three
+long, randomly-sized query params (mimicking Google's real `rlz`/`oq`/
+`gs_lcrp`, OAuth `state`/`token`, session/signature blobs), attached to
+~10% of all legit URLs. First attempt (single param, 7% of legit URLs) only
+partially worked -- dropped the reported URL from 99.9996% to ~95%, still
+wrong. Diagnosed why via a second contribution-analysis pass:
+`num_special_chars` (each extra `=`/`&` per param) had become the new
+dominant driver, and legit coverage at high `num_special_chars` was still
+thin (0.24% vs phishing's 3.19%). Fixed by making the blob generator
+stack multiple params at once (matching how a real Google search URL
+actually looks -- five-plus tracking params together, not one), which
+pushed legit coverage to 0.76% and closed enough of the gap.
+
+**Result**: XGBoost score on the reported URL -> **3.0% phishing (confidently
+correct)**, confirmed live end-to-end through the real backend. Full
+by-class coverage audit re-run and clean (no new 0%-only-in-one-class
+gaps). Re-verified against the entire Milestone 11 battery: all previously
+fixed cases stayed fixed, `github.com/anthropics` unchanged (known
+residual, ~80%), `twitter.com/anthropicai` moved to right at the boundary
+(XGBoost 55.5%, technically still wrong but no longer a confident
+misfire -- RF actually gets this one right at 3.6%, a genuine trade-off
+noted, not chased further). XGBoost retained as the shipped model --
+still wins the automatic F1 comparison (0.9180 vs RF's 0.9161) and has
+much stronger, more reliable phishing-recall margins (99.7-100% vs RF's
+81-82% on the same real phishing test cases) despite occasionally being
+less generous on the hardest borderline legit cases.
+
+**Process note**: per [[phishguard_model_selection]], re-ran the RF-vs-XGBoost
+edge-case comparison at every retrain in this milestone since the F1 gap
+stayed under 0.002 each time -- confirmed XGBoost remained the right
+practical choice throughout, not just the F1-optimal one on paper.
+
+## Milestone 11 — real-world false positive fix: bare-root/trailing-slash bug (done, 2026-08-01)
+
+User reported a real false positive from actual browsing: `https://launchpad.ccbp.in/`
+(a genuine course platform) scored 72.3% phishing. Diagnosed via the same
+per-feature contribution analysis used in the Milestone 8 follow-up (not
+guessed at): `path_length` going from 0 (bare domain) to 1 (just a trailing
+slash) contributed +2.47 on its own -- by far the largest driver. Root
+cause: `_random_path` in `ml/prepare_dataset.py` treated `""` (no path) and
+`"/"` (trailing slash) as a 50/50 coin flip for synthetic legit URLs, giving
+legit only ~4% coverage at `path_length==1` vs PhishTank's real 29.9% for
+phishing -- but real browsers virtually always normalize a homepage visit to
+include the trailing slash, so `path_length==1` should be the dominant case
+for real legit traffic, not a rare one. Same class of bug as the
+`num_slashes`/`num_subdomains` fixes in Milestone 8 (dataset construction
+methodology not matching real browsing behavior), just not caught until a
+real user hit it.
+
+**Fixed in two rounds**, each re-verified with the project's established
+audit method (check every feature value present in one class at >=0.5% but
+0% in the other) before trusting the result:
+1. Weighted the `""`/`"/"` split 90/10 toward `"/"` -- moved the reported
+   URL from 72.3% to 58.8% phishing. Real improvement, not yet enough to
+   flip the verdict.
+2. Went further: raised `_DEPTH0_WEIGHT` (how often a legit URL gets *any*
+   bare-root shape) from 8% to 20%, since PhishTank's real bare-root rate is
+   35.6% and a homepage-only visit is at least as common in real legitimate
+   browsing (opening a known site directly, not a deep link). Also pushed
+   the `""`/`"/"` split to 95/5. This surfaced and fixed a second real gap
+   the same audit caught along the way: `path_length==2` was 0% for legit
+   (the shortest random path-segment token was 3 chars; real phishing URLs
+   have 1-2 char segments too) -- fixed by lowering the token's minimum
+   length from 3 to 1 in `_random_segment`.
+
+**Result**: `launchpad.ccbp.in/` -> **37% phishing (correctly legit)**,
+confirmed live end-to-end through the real running backend and dashboard.
+Cross-validated against other real bare-root sites surfaced in the
+dashboard's own scan history that had the same unreported bug (`web.whatsapp.com/`
+71.6%->34%, `leetcode.com/` 50.1%->25%, `chatgpt.com/` 63.2%->17%,
+`www.youtube.com/` similarly) -- confirms this was a broad, systemic fix,
+not something narrowly overfit to the one reported URL.
+
+**Trade-off, reported honestly, not hidden**: `twitter.com/anthropicai`
+(fixed in the Milestone 8 follow-up) regressed from borderline-correct
+(50.1% legit) to borderline-wrong (64.7% phishing). Investigated via
+contribution analysis: not a new artifact -- `num_subdomains==0` (no
+subdomain) is a real, modest, pre-existing skew (21.7% legit vs 28.6%
+phishing, both well-represented, not a coverage gap) that became more
+decisive once `path_length`'s outsized influence was corrected. This is the
+same class of "genuine ceiling of a 17-feature lexical-only classifier" as
+the already-accepted `github.com/anthropics` case (unchanged at 78.1%, one
+of the few cases XGBoost still gets wrong) -- not chased further, per the
+project's standing rule against hand-tuning synthetic data to defeat
+specific adversarial examples.
+
+**Model re-comparison**: retraining after each fix produced an extremely
+close RF-vs-XGBoost F1 race. After round 1, the automatic "highest F1"
+picker chose Random Forest (0.9336 vs XGBoost's 0.9323) -- manually
+overrode this after a head-to-head test on real cases showed XGBoost's
+probabilities are far better calibrated (phishing recall 99.95-100% vs RF's
+79-86%; much better on `github.com/anthropics`, 78% vs RF's 100%). After
+round 2, XGBoost won the automatic F1 comparison outright (0.9205 vs RF's
+0.9189), so `ml.train`'s normal picker now agrees with the manual override
+-- no standing override needed going forward. Final metrics: XGBoost acc
+92.16% / prec 0.9338 / rec 0.9076 / f1 0.9205 (down from the earlier
+94.08%, expected and correct: that number was inflated by exactly the
+`path_length` artifact just fixed).
 
 ## Completed milestones
 
@@ -307,31 +507,52 @@ Last updated: 2026-07-31 (end of day)
   signal), not a data artifact, and not worth chasing further by hand-
   tuning synthetic data to specific adversarial examples.
 
-## Current project status
+## Current project status (as of 2026-08-03)
 
-Repo is scaffolded, local dev environment is fully working, a clean labeled
-dataset (130k URLs, balanced, with realistic path/subdomain diversity on
-the legit side) exists at `ml/data/processed/dataset.csv`, a trained
-XGBoost model (96.5% held-out accuracy) is exported to
-`ml/models/model.joblib` with results documented in `ml/MODEL_REPORT.md`,
-the FastAPI backend serves real verdicts end-to-end via `POST /scan`,
-persists them to SQLite, and exposes them via `GET /history` and `GET
-/reports` (CSV), and the Chrome extension (Manifest V3) scans on
-navigation and shows a verdict popup — verified working against the real
-backend in an actual loaded Chrome extension, not just unit tests. The
-React dashboard (`dashboard/`, Vite + React 19 + Tailwind v4) reads
-`/history` for a scan table, a hand-built verdict-breakdown bar chart, and
-stat tiles, plus a one-click CSV export — smoke-tested end to end against
-the real backend and a real loaded extension in the same browser.
-Application code so far: `ml/prepare_dataset.py`, `ml/features.py`,
-`ml/train.py`, `ml/tests/test_features.py`; the full `backend/app/`
-package (`main.py`, `api/{scan,history,reports}.py`,
-`schemas/{scan,history}.py`, `ml_service/predictor.py`,
-`db/{database,models}.py`) with `backend/tests/` (`conftest.py`,
-`test_scan.py`, `test_history.py`, 18 tests total); `extension/`
-(`manifest.json`, `background.js`, `popup/`); and `dashboard/src/`
-(`App.jsx`, `api.js`, `components/{StatTiles,VerdictBarChart,
-HistoryTable,ExportButton}.jsx`).
+The FastAPI backend now combines **three signals** into one explainable
+verdict via `POST /scan`: the ML phishing probability, a live URLhaus
+blocklist check, and a live RDAP domain-age check (`backend/app/
+verdict.py`) -- `is_phishing`/`confidence`/`ml_score`/`urlhaus_status`/
+`domain_age_days`/`domain_age_status`/`verdict_reason`. The domain-age
+signal (Milestone 13, above) resolved the last open residual false-positive
+case (`twitter.com/anthropicai`) and the previously-known one
+(`github.com/anthropics`). Persistence, `/history`, `/reports`, the
+extension popup, and the dashboard's history table all carry the full
+7-field breakdown now. 24 backend/ml tests passing.
+
+## Previous project status snapshot (as of end of day 2026-08-01)
+
+Repo is scaffolded, local dev environment is fully working. Dataset
+(`ml/data/processed/dataset.csv`, 130k URLs, balanced) has been regenerated
+several times since Milestone 4 to close real coverage gaps found via a
+by-class audit (path/subdomain diversity in Milestone 8; bare-root/trailing-
+slash and long-tracking-param-URL coverage in Milestones 11-12). The
+currently shipped model is **XGBoost, acc 91.94% / F1 0.9180**
+(`ml/models/model.joblib`, results in `ml/MODEL_REPORT.md`) — lower than
+earlier headline numbers on paper, and that's expected: each drop
+corresponds to a real synthetic-data artifact being removed, not the model
+getting worse at anything real.
+
+The FastAPI backend serves a **combined, explainable verdict** (not just a
+raw ML number) via `POST /scan`: ML phishing-probability +
+URLhaus blocklist check, combined in `backend/app/verdict.py` into
+`is_phishing`/`confidence`/`ml_score`/`urlhaus_status`/`verdict_reason`.
+Persists to SQLite (`ScanRecord`, all 5 fields) and exposes `GET /history`
+and `GET /reports` (CSV), both with the full explainability breakdown. The
+Chrome extension (Manifest V3) popup and the React dashboard's history
+table both show the verdict reason and blocklist status now, not just a
+confidence percentage — verified in an actual loaded Chrome extension and
+a real browser session, not just unit tests. 20 backend/ml tests passing.
+
+Application code: `ml/prepare_dataset.py`, `ml/features.py`, `ml/train.py`,
+`ml/tests/test_features.py`; `backend/app/` (`main.py`,
+`api/{scan,history,reports}.py`, `schemas/{scan,history}.py`,
+`ml_service/predictor.py`, `db/{database,models}.py`,
+`threat_intel/urlhaus.py`, `verdict.py`) with `backend/tests/`
+(`conftest.py`, `test_scan.py`, `test_history.py`); `extension/`
+(`manifest.json`, `background.js`, `popup/`); `dashboard/src/` (`App.jsx`,
+`api.js`, `components/{StatTiles,VerdictBarChart,HistoryTable,
+ExportButton}.jsx`). `.env` (gitignored) holds `URLHAUS_AUTH_KEY`.
 
 - **Milestone 8 extension re-test (2026-07-31).** After the false-positive
   fix above, re-verified through the *actual loaded Chrome extension*
@@ -383,15 +604,61 @@ HistoryTable,ExportButton}.jsx`).
   problem (a borderline ML score plus "not on any blocklist" plus "no
   brand-name match" reads very differently from a borderline score alone).
 
+- **Milestone 10a — URLhaus threat intel (done, 2026-07-31).** Typosquat
+  feature deliberately deferred (user chose to ship URLhaus first). Added
+  `backend/app/threat_intel/urlhaus.py` (async blocklist lookup, 4s
+  timeout) and `backend/app/verdict.py` (combines ML phishing-probability +
+  URLhaus status into one verdict with a human-readable `verdict_reason` —
+  a confirmed URLhaus hit overrides the ML score outright, otherwise the
+  ML score decides and the reason notes whether URLhaus was checked). `/scan`
+  is now `async def`; `ScanResponse` gained `ml_score`, `urlhaus_status`,
+  `verdict_reason` alongside the existing `is_phishing`/`confidence`.
+  `predictor.predict()` now always returns the raw phishing-class
+  probability (`_model.classes_` confirmed `[0, 1]`, so index 1 is always
+  P(phishing)) instead of "confidence in whichever class was predicted",
+  since the combine logic needs the actual phishing probability regardless
+  of which side of 0.5 it fell on.
+
+  **Snag hit and fixed**: URLhaus's API now requires a free `Auth-Key`
+  header — abuse.ch added mandatory auth across their APIs at some point
+  after the 07-31 comparison (which assumed "no API key needed", confirmed
+  via `curl` returning `401 {"error": "Unauthorized"}` with no key). Still
+  free — got one from `auth.abuse.ch`, stored as `URLHAUS_AUTH_KEY` in
+  `.env` (already gitignored, `python-dotenv` was already a dependency).
+  The graceful-fallback design meant this degraded safely even before the
+  key was added (401 → caught as an `httpx.HTTPError` → `"unknown"`, never
+  a broken endpoint) — confirms the fallback-first design was the right
+  call. Also bumped the lookup timeout from an initial 2s to 4s after live
+  testing showed the very first request from a cold connection (TLS
+  handshake overhead) timed out at 2s but succeeded well within 4s.
+
+  **Testing approach**: existing tests updated so the `client` fixture
+  monkeypatches `check_urlhaus` to a fake async function returning
+  `"not_listed"` by default (`backend/tests/conftest.py`) — the test suite
+  never makes a real network call. Two new tests cover the `"listed"`
+  (overrides ML score, confidence forced ≥0.99) and `"unknown"` (falls back
+  to ML-only, reason notes unavailability) paths explicitly via
+  monkeypatch, rather than depending on URLhaus's live, constantly-changing
+  blocklist contents (which would make a "listed" test flaky). 11/11 tests
+  passing. Manually smoke-tested against the real running backend with the
+  real key: a clean HTTPS Google search URL and a fake PayPal-lookalike
+  domain both returned correct `urlhaus_status: "not_listed"` alongside the
+  expected ML verdict.
+
+  **Resolved 2026-07-31 (Milestone 10b)**: extension popup and dashboard
+  now both surface `verdict_reason`/`urlhaus_status` — see Milestone 10b
+  above for details (DB migration, popup badges, dashboard columns).
+
 ## Next milestone
 
-**Milestone 10 — Typosquat feature + URLhaus threat intel** (in progress,
-starting 2026-08-01): typosquat/brand-similarity feature in
-`ml/features.py` + retrain; URLhaus blocklist check called from `/scan`
-(requires making `/scan` async with a timeout and a graceful fallback to
-ML-only if the call fails); combine both signals with the ML score into
-one explainable verdict. WHOIS domain age and the final README/deployment
-polish come after. See `TODO.md` for the concrete task breakdown.
+**Done as of 2026-08-03**: the RDAP domain-age signal planned here shipped
+as Milestone 13 (see top of this file) — resolved both previously-open
+residual cases. What's left is no longer feature work: a final README pass
++ screenshots/demo for the resume, and replacing the `<Your Name>`
+placeholder in `LICENSE`. Typosquat/brand-similarity feature was
+considered, briefly deferred, then dropped outright (2026-07-31) — not
+planned. See `TODO.md` for the concrete task breakdown and current status
+of everything.
 
 ## Important design decisions made today
 

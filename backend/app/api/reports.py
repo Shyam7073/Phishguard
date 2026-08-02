@@ -18,10 +18,34 @@ def export_reports_csv(db: Session = Depends(get_db)) -> StreamingResponse:
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(["id", "url", "is_phishing", "confidence", "scanned_at"])
+    writer.writerow(
+        [
+            "id",
+            "url",
+            "is_phishing",
+            "confidence",
+            "ml_score",
+            "urlhaus_status",
+            "domain_age_days",
+            "domain_age_status",
+            "verdict_reason",
+            "scanned_at",
+        ]
+    )
     for record in records:
         writer.writerow(
-            [record.id, record.url, record.is_phishing, record.confidence, record.scanned_at]
+            [
+                record.id,
+                record.url,
+                record.is_phishing,
+                record.confidence,
+                record.ml_score,
+                record.urlhaus_status,
+                record.domain_age_days,
+                record.domain_age_status,
+                record.verdict_reason,
+                record.scanned_at,
+            ]
         )
     buffer.seek(0)
 

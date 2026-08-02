@@ -1,5 +1,6 @@
 const GOOD = "#0ca30c";
 const CRITICAL = "#d03b3b";
+const NEUTRAL = "#898781";
 
 function VerdictBadge({ isPhishing }) {
   const color = isPhishing ? CRITICAL : GOOD;
@@ -7,6 +8,48 @@ function VerdictBadge({ isPhishing }) {
 
   return (
     <span className="inline-flex items-center gap-1.5 text-sm font-medium text-[#0b0b0b] dark:text-white">
+      <span
+        className="inline-block w-2 h-2 rounded-full shrink-0"
+        style={{ backgroundColor: color }}
+        aria-hidden="true"
+      />
+      {label}
+    </span>
+  );
+}
+
+const URLHAUS_LABELS = {
+  listed: { text: "Blocklisted", color: CRITICAL },
+  not_listed: { text: "Clean", color: GOOD },
+  unknown: { text: "Unchecked", color: NEUTRAL },
+};
+
+function UrlhausBadge({ status }) {
+  const { text, color } = URLHAUS_LABELS[status] || { text: "—", color: NEUTRAL };
+  return (
+    <span className="inline-flex items-center gap-1.5 text-sm text-[#0b0b0b] dark:text-white">
+      <span
+        className="inline-block w-2 h-2 rounded-full shrink-0"
+        style={{ backgroundColor: color }}
+        aria-hidden="true"
+      />
+      {text}
+    </span>
+  );
+}
+
+const DOMAIN_AGE_COLORS = {
+  new: CRITICAL,
+  moderate: NEUTRAL,
+  established: GOOD,
+  unknown: NEUTRAL,
+};
+
+function DomainAgeBadge({ status, days }) {
+  const color = DOMAIN_AGE_COLORS[status] || NEUTRAL;
+  const label = status === "unknown" || status == null ? "—" : days != null ? `${days}d (${status})` : status;
+  return (
+    <span className="inline-flex items-center gap-1.5 text-sm text-[#0b0b0b] dark:text-white">
       <span
         className="inline-block w-2 h-2 rounded-full shrink-0"
         style={{ backgroundColor: color }}
@@ -37,6 +80,9 @@ export default function HistoryTable({ records }) {
           <tr className="border-b border-[#e1e0d9] dark:border-[#2c2c2a] text-left text-[#52514e] dark:text-[#c3c2b7]">
             <th className="px-4 py-2 font-medium">URL</th>
             <th className="px-4 py-2 font-medium">Verdict</th>
+            <th className="px-4 py-2 font-medium">Reason</th>
+            <th className="px-4 py-2 font-medium">Blocklist</th>
+            <th className="px-4 py-2 font-medium">Domain age</th>
             <th className="px-4 py-2 font-medium text-right">Confidence</th>
             <th className="px-4 py-2 font-medium text-right">Scanned at</th>
           </tr>
@@ -52,6 +98,18 @@ export default function HistoryTable({ records }) {
               </td>
               <td className="px-4 py-2">
                 <VerdictBadge isPhishing={record.is_phishing} />
+              </td>
+              <td
+                className="px-4 py-2 max-w-xs truncate text-[#52514e] dark:text-[#c3c2b7]"
+                title={record.verdict_reason || ""}
+              >
+                {record.verdict_reason || "—"}
+              </td>
+              <td className="px-4 py-2">
+                <UrlhausBadge status={record.urlhaus_status} />
+              </td>
+              <td className="px-4 py-2">
+                <DomainAgeBadge status={record.domain_age_status} days={record.domain_age_days} />
               </td>
               <td className="px-4 py-2 text-right tabular-nums text-[#0b0b0b] dark:text-white">
                 {(record.confidence * 100).toFixed(1)}%

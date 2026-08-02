@@ -78,11 +78,54 @@ QUERY_STRINGS = [
 
 _ALPHABET = list(string.ascii_letters + string.digits)
 
+
+_TRACKING_PARAM_NAMES = ["rlz", "gs_lcrp", "state", "token", "session", "sig", "data", "oq"]
+
+
+def _tracking_blob(rng: np.random.Generator) -> str:
+    """One or more long, randomly-sized tracking/analytics query params.
+
+    Mimics real search-engine and analytics params (Google's own `rlz`/
+    `gs_lcrp`/`oq`, OAuth `state`/`token`, session/signature blobs) -- a
+    random continuous length instead of a handful of fixed QUERY_STRINGS
+    literals (which top out around 60 chars), so `url_length` and
+    `num_special_chars` get smooth coverage into the range real
+    tracking-heavy URLs commonly reach. A *real* Google address-bar search
+    stacks several of these (rlz + oq + gs_lcrp + sourceid + ie all at
+    once), not just one -- a single param undersold both `url_length` and
+    `num_special_chars` (each extra param adds its own "=" and "&"),
+    leaving the model still ~95% confident on a real reported false
+    positive even after adding one blob. Found via a real user report (a
+    real Google search URL scored 99.9996% phishing, then still ~95% after
+    a first, single-param-only fix) -- see PROJECT_PROGRESS.md.
+    """
+    num_params = rng.integers(1, 4)
+    parts = []
+    for _ in range(num_params):
+        length = rng.integers(15, 120)
+        blob = "".join(rng.choice(_ALPHABET, size=length))
+        parts.append(f"{rng.choice(_TRACKING_PARAM_NAMES)}={blob}")
+    return "&".join(parts)
+
 # Path depth in "/"-separated segments, weighted toward shallow (typical
 # browsing) but with a real tail into deep routes -- unlike the old fixed
 # template list, depth 4+ (which is where num_slashes >= 6 lives) is a
 # regular occurrence here, not something that only appears in phishing URLs.
-_DEPTH_WEIGHTS = [0.08, 0.28, 0.27, 0.17, 0.10, 0.06, 0.03, 0.01]
+#
+# depth==0 (bare-root/homepage visit) was originally 8%, which undershoots
+# real traffic badly: PhishTank's real phishing URLs sit at bare-root (no
+# path or just "/") 35.6% of the time, and a bare homepage visit is at least
+# as common in real legitimate browsing -- every time someone opens a known
+# site directly (github.com, reddit.com, their bank) rather than a deep
+# link. 20% still likely undersells it, but moves it much closer to a
+# realistic share instead of an arbitrary "mostly deep paths" assumption.
+# Found via a real user report (a genuine site scored 72% phishing on
+# nothing but "https://.../" ), not synthetic testing -- see
+# PROJECT_PROGRESS.md.
+_DEPTH0_WEIGHT = 0.20
+_DEPTH_TAIL_SHAPE = [0.28, 0.27, 0.17, 0.10, 0.06, 0.03, 0.01]
+_tail_scale = (1 - _DEPTH0_WEIGHT) / sum(_DEPTH_TAIL_SHAPE)
+_DEPTH_WEIGHTS = [_DEPTH0_WEIGHT] + [w * _tail_scale for w in _DEPTH_TAIL_SHAPE]
 
 
 def _random_segment(rng: np.random.Generator) -> str:
@@ -103,14 +146,28 @@ def _random_segment(rng: np.random.Generator) -> str:
         return separator.join(rng.choice(PATH_WORDS) for _ in range(word_count))
     # A variable-length random alphanumeric token (mimicking real
     # usernames/slugs/hashes/video-ids, which differ in length every time).
-    length = rng.integers(3, 25)
+    # Starts at 1, not 3: the shortest PATH_WORDS entries are 2 chars
+    # ("v1"/"v2"), so path_length==2 (a "/" plus a single-char segment, e.g.
+    # a real pagination link like "/1") had zero legit coverage otherwise --
+    # found via the same by-class audit that caught the trailing-slash gap.
+    length = rng.integers(1, 25)
     return "".join(rng.choice(_ALPHABET, size=length))
 
 
 def _random_path(rng: np.random.Generator) -> str:
     depth = rng.choice(len(_DEPTH_WEIGHTS), p=_DEPTH_WEIGHTS)
     if depth == 0:
-        path = rng.choice(["", "/"])
+        # Real browser navigation almost always normalizes a homepage visit
+        # to a trailing slash ("https://example.com/"), so "/" should be the
+        # overwhelmingly common case here, not a 50/50 split with "" -- a
+        # 50/50 split starved path_length==1 of legit coverage (~4% of legit
+        # rows) relative to how common it actually is in real traffic, while
+        # PhishTank's real phishing URLs sit at path_length==1 ~30% of the
+        # time. That mismatch alone was enough to flip a real, legitimate
+        # bare-domain page (e.g. "https://example.com/") from ~7% to ~72%
+        # phishing on a single trailing slash. Found via a real user report,
+        # not synthetic testing -- see PROJECT_PROGRESS.md.
+        path = rng.choice(["", "/"], p=[0.05, 0.95])
     else:
         segments = [_random_segment(rng) for _ in range(depth)]
         path = "/" + "/".join(segments)
@@ -122,7 +179,14 @@ def _random_path(rng: np.random.Generator) -> str:
     # ends up *more* associated with phishing than legit and inverts the
     # signal the model should be learning.
     if rng.random() < 0.2:
-        path += rng.choice(QUERY_STRINGS)
+        query = rng.choice(QUERY_STRINGS)
+        # ~10% of all legit URLs (0.2 * 0.5) also get one or more long
+        # tracking params tacked on -- real search-engine/analytics/OAuth
+        # URLs commonly look exactly like this (a normal-looking param plus
+        # several long opaque ones).
+        if rng.random() < 0.5:
+            query += "&" + _tracking_blob(rng)
+        path += query
     return path
 
 # Same reasoning as PATH_TEMPLATES: Tranco domains are bare apex domains, so

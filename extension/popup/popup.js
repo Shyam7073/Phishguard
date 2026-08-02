@@ -6,13 +6,34 @@
 const API_BASE = "http://127.0.0.1:8000";
 
 const statusEl = document.getElementById("status");
-const detailsEl = document.getElementById("details");
+const reasonEl = document.getElementById("reason");
+const confidenceEl = document.getElementById("confidence");
+const blocklistEl = document.getElementById("blocklist");
+const domainAgeEl = document.getElementById("domain-age");
+
+const BLOCKLIST_LABELS = {
+  listed: { text: "🚫 On URLhaus blocklist", className: "danger" },
+  not_listed: { text: "✓ Not on any blocklist", className: "safe" },
+  unknown: { text: "Blocklist check unavailable", className: "unknown" },
+};
+
+const DOMAIN_AGE_LABELS = {
+  new: { className: "danger" },
+  moderate: { className: "unknown" },
+  established: { className: "safe" },
+  unknown: { text: "Domain age unavailable", className: "unknown" },
+};
 
 function render(result) {
   if (result.error) {
     statusEl.textContent = "Scan failed";
     statusEl.className = "unknown";
-    detailsEl.textContent = result.error;
+    reasonEl.textContent = result.error;
+    confidenceEl.textContent = "";
+    blocklistEl.textContent = "";
+    blocklistEl.className = "badge";
+    domainAgeEl.textContent = "";
+    domainAgeEl.className = "badge";
     return;
   }
 
@@ -23,7 +44,24 @@ function render(result) {
     statusEl.textContent = "✓ Looks safe";
     statusEl.className = "safe";
   }
-  detailsEl.textContent = `Confidence: ${(result.confidence * 100).toFixed(1)}%`;
+
+  // Fall back gracefully for verdicts cached before these fields existed.
+  reasonEl.textContent =
+    result.verdict_reason || (result.is_phishing ? "Flagged by ML model" : "Looks safe");
+  confidenceEl.textContent = `Confidence: ${(result.confidence * 100).toFixed(1)}%`;
+
+  const blocklist = BLOCKLIST_LABELS[result.urlhaus_status] || BLOCKLIST_LABELS.unknown;
+  blocklistEl.textContent = blocklist.text;
+  blocklistEl.className = `badge ${blocklist.className}`;
+
+  // Fall back gracefully for verdicts cached before domain age existed.
+  const domainAge = DOMAIN_AGE_LABELS[result.domain_age_status] || DOMAIN_AGE_LABELS.unknown;
+  domainAgeEl.textContent =
+    domainAge.text ||
+    (result.domain_age_days != null
+      ? `Domain age: ${result.domain_age_days} days`
+      : "Domain age unavailable");
+  domainAgeEl.className = `badge ${domainAge.className}`;
 }
 
 async function scanUrl(url) {

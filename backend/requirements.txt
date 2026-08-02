@@ -5,6 +5,8 @@ pydantic
 sqlalchemy
 python-dotenv
 tldextract
+httpx  # async client for the URLhaus threat-intel lookup in /scan
+whodap  # RDAP client for the domain-age signal in /scan
 
 # Needed to load and run the exported model artifact
 scikit-learn

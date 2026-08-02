@@ -21,7 +21,11 @@ def predict(url: str) -> dict:
     features = extract_features(url)
     vector = [[features[name] for name in FEATURE_NAMES]]
 
-    label = int(_model.predict(vector)[0])
-    confidence = float(_model.predict_proba(vector)[0][label])
+    # _model.classes_ is [0, 1] (legit, phishing), so index 1 is always the
+    # phishing-class probability regardless of which class predict() picks.
+    phishing_probability = float(_model.predict_proba(vector)[0][1])
 
-    return {"is_phishing": bool(label), "confidence": confidence}
+    return {
+        "is_phishing": phishing_probability >= 0.5,
+        "phishing_probability": phishing_probability,
+    }

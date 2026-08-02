@@ -37,4 +37,8 @@ def test_reports_csv_export(client):
 def test_reports_csv_empty_still_has_header(client):
     response = client.get("/reports")
     assert response.status_code == 200
-    assert response.text.strip() == "id,url,is_phishing,confidence,scanned_at"
+    assert (
+        response.text.strip()
+        == "id,url,is_phishing,confidence,ml_score,urlhaus_status,domain_age_days,"
+        "domain_age_status,verdict_reason,scanned_at"
+    )
