@@ -33,7 +33,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-[#f9f9f7] dark:bg-[#0d0d0d]">
-      <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
+      <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
         <header className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-2xl font-semibold text-[#0b0b0b] dark:text-white">

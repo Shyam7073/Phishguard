@@ -77,6 +77,8 @@ QUERY_STRINGS = [
 ]
 
 _ALPHABET = list(string.ascii_letters + string.digits)
+_HEX_ALPHABET = list("0123456789abcdef")
+_DIGIT_ALPHABET = list(string.digits)
 
 
 _TRACKING_PARAM_NAMES = ["rlz", "gs_lcrp", "state", "token", "session", "sig", "data", "oq"]
@@ -144,8 +146,26 @@ def _random_segment(rng: np.random.Generator) -> str:
         word_count = rng.integers(2, 5)
         separator = "-" if rng.random() < 0.7 else "_"
         return separator.join(rng.choice(PATH_WORDS) for _ in range(word_count))
+    if roll < 0.75:
+        # A hex-hash-like token (git commit SHAs, session/API tokens).
+        # Hex only has 16 possible characters, 10 of which are digits
+        # (~62% digit-heavy) vs a general alphanumeric token's ~16% --
+        # without this shape, legit `digit_ratio` had almost no coverage
+        # above ~0.5 (0.04% of legit rows vs 4.44% of phishing), so any
+        # real digit-heavy legit URL (a GitHub commit link, a session
+        # token) was misread as phishing on that one feature alone. Found
+        # via a real user report (`github.com/.../commit/<sha>` scored
+        # 98.9% phishing) -- see PROJECT_PROGRESS.md.
+        length = rng.integers(6, 41)
+        return "".join(rng.choice(_HEX_ALPHABET, size=length))
+    if roll < 0.85:
+        # A purely numeric token (database IDs, order/tracking numbers) --
+        # same digit-ratio gap as the hex case above, just the extreme end
+        # of it (100% digits).
+        length = rng.integers(1, 20)
+        return "".join(rng.choice(_DIGIT_ALPHABET, size=length))
     # A variable-length random alphanumeric token (mimicking real
-    # usernames/slugs/hashes/video-ids, which differ in length every time).
+    # usernames/slugs, which differ in length every time).
     # Starts at 1, not 3: the shortest PATH_WORDS entries are 2 chars
     # ("v1"/"v2"), so path_length==2 (a "/" plus a single-char segment, e.g.
     # a real pagination link like "/1") had zero legit coverage otherwise --

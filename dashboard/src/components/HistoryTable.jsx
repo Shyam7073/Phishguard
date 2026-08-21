@@ -93,14 +93,14 @@ export default function HistoryTable({ records }) {
               key={record.id}
               className="border-b border-[#e1e0d9] dark:border-[#2c2c2a] last:border-0"
             >
-              <td className="px-4 py-2 max-w-xs truncate text-[#0b0b0b] dark:text-white" title={record.url}>
+              <td className="px-4 py-2 max-w-md truncate text-[#0b0b0b] dark:text-white" title={record.url}>
                 {record.url}
               </td>
               <td className="px-4 py-2">
                 <VerdictBadge isPhishing={record.is_phishing} />
               </td>
               <td
-                className="px-4 py-2 max-w-xs truncate text-[#52514e] dark:text-[#c3c2b7]"
+                className="px-4 py-2 max-w-md truncate text-[#52514e] dark:text-[#c3c2b7]"
                 title={record.verdict_reason || ""}
               >
                 {record.verdict_reason || "—"}

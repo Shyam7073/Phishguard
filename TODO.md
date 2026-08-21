@@ -203,6 +203,51 @@ Considered, briefly deferred, then dropped outright. Not planned anymore.
       domain age unavailable as expected, recall unaffected), real Google
       search URL (domain 10548 days old, still correctly legitimate)
 
+## Milestone 14 — digit-ratio false positive fix (done, 2026-08-03)
+- [x] Diagnosed a real user-reported false positive found via the dashboard
+      layout work: a GitHub commit URL
+      (`github.com/Shyam7073/Phishguard/commit/<40-char-hex-sha>`) scored
+      98.9% phishing. Contribution analysis showed `digit_ratio` alone
+      contributing +6.05 (dwarfing every other feature, most of which
+      actually leaned legit) — a 40-char hex commit SHA is ~65% digits
+- [x] Confirmed via by-class audit: legit training rows had `digit_ratio
+      >= 0.6` only 0.037% of the time vs phishing's 4.44% (a 120x gap) —
+      `ml/prepare_dataset.py`'s random-token generator sampled uniformly
+      from letters+digits (62 chars, ~16% digit chance), never producing
+      hex-hash-like or purely-numeric tokens the way real commit SHAs,
+      session tokens, and database/order IDs actually look
+- [x] Added two new token shapes to `_random_segment()`: hex-alphabet
+      tokens (10% of segments) and purely-numeric tokens (10%), alongside
+      the existing route-word/slug/general-alphanumeric shapes
+- [x] Regenerated dataset — `digit_ratio >= 0.6` coverage closed to 5.6%
+      legit vs 4.44% phishing (near parity, was 120x gap). Full by-class
+      audit re-run, clean, no new gaps
+- [x] Retrained: Random Forest won the automatic F1 comparison by a
+      hair (0.9169 vs XGBoost's 0.9164, gap < 0.001) — per the project's
+      standing rule on near-tied F1 races, re-checked both models against
+      the full real-URL test battery before trusting the auto-pick.
+      **Manually overrode to XGBoost**: far stronger real phishing recall
+      (99.3-100% vs RF's 73.5-93% on 5 real phishing URLs) and better
+      calibration on the residual borderline-legit cases
+      (`twitter.com/anthropicai`: XGBoost 71.4% vs RF's 95.4%, both wrong
+      but XGBoost far less confidently so)
+- [x] Verified live end-to-end: the reported GitHub commit URL now scores
+      **0.03% phishing** (confidently correct, was 98.9%). Re-ran the full
+      Milestone 11/12/13 battery — all previously-fixed cases stayed
+      fixed (`github.com/anthropics` 77.7%, `twitter.com/anthropicai`
+      71.4%, both still correctly rescued by the established-domain
+      signal; real phishing recall unchanged). 27/27 tests passing
+- [x] Added a small `TTLCache` (`backend/app/threat_intel/cache.py`)
+      shared by both `urlhaus.py` (15 min TTL, keyed by URL) and
+      `domain_age.py` (24h TTL, keyed by domain) to avoid redundant
+      network lookups on repeat scans of the same URL/domain — confirmed
+      live (first lookup ~1-3s, cached lookups ~0.000s)
+- [x] Dashboard layout: widened the page from `max-w-4xl` to `max-w-7xl`
+      and loosened the URL/Reason column truncation from `max-w-xs` to
+      `max-w-md`, since the table (now 7 columns after Milestone 13's
+      domain-age column) was cramped while the page had unused width on
+      wide screens
+
 ## Next up
 - [ ] Final README pass, screenshots/demo for resume (still last)
 - [ ] LICENSE file has a placeholder `<Your Name>` — replace with your actual name.

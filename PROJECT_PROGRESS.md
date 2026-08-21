@@ -2,6 +2,73 @@
 
 Last updated: 2026-08-03
 
+## Milestone 14 — digit-ratio false positive fix + lookup caching (done, 2026-08-03)
+
+Surfaced while checking the dashboard's widened layout: the extension had
+scanned its own repo's GitHub commit page
+(`github.com/Shyam7073/Phishguard/commit/<40-char-hex-sha>`) and scored it
+**98.9% phishing**. Diagnosed with the project's standard contribution
+analysis: `digit_ratio` alone contributed +6.05, dwarfing every other
+feature (most of which -- `hostname_length`, `num_slashes`, `path_length`
+-- actually leaned *legitimate*, correctly recognizing the established
+GitHub domain and realistic deep path). A 40-character hex commit SHA is
+~65% digit characters; a purely alphanumeric random token (the shape
+`ml/prepare_dataset.py` used for "hash/ID-like" segments) only produces
+~16% digits on average, since it draws uniformly from all 62 letters+digits
+rather than the 16-character hex alphabet or a purely-numeric one.
+
+**Confirmed via the by-class audit**: legit training rows had `digit_ratio
+>= 0.6` in only 0.037% of rows vs phishing's 4.44% -- a 120x gap. Same root
+cause family as Milestones 8/11/12 (synthetic legit-URL generation not
+covering a real URL shape): commit hashes, session tokens, and numeric
+database/order IDs are all common, totally benign, digit-dense strings
+that the synthetic generator never produced.
+
+**Fix**: added two new token shapes to `_random_segment()` -- a
+hex-alphabet token (10% of segments, mimicking commit SHAs/session tokens)
+and a purely-numeric token (10%, mimicking database IDs/order numbers),
+alongside the existing route-word/slug/general-alphanumeric shapes.
+Regenerated the dataset -- `digit_ratio >= 0.6` coverage moved to 5.6%
+legit vs 4.44% phishing (near parity). Full by-class audit re-run and
+clean, no new gaps introduced.
+
+**Model re-comparison**: Random Forest won the automatic F1 race by a hair
+(0.9169 vs XGBoost's 0.9164, gap under 0.001). Per the project's standing
+rule for near-tied F1 races, re-checked both models head-to-head against
+the full real-URL test battery before trusting the auto-pick -- same
+process as Milestone 11. Random Forest's win didn't hold up: on 5 real
+phishing test URLs, RF's confidence ranged 73.5-93% vs XGBoost's
+99.3-100%, and on the residual borderline-legit case
+(`twitter.com/anthropicai`), RF was *more* confidently wrong (95.4%
+phishing) than XGBoost (71.4%). **Manually overrode to XGBoost**, same
+conclusion as every prior re-check -- documented in `ml/MODEL_REPORT.md`
+with the actual numbers rather than silently overriding.
+
+**Result, verified live end-to-end**: the reported GitHub commit URL now
+scores **0.03% phishing** (confidently correct, was 98.9%). Re-ran the
+full Milestone 11/12/13 test battery -- all previously-fixed cases stayed
+fixed: `github.com/anthropics` 77.7% (still correctly rescued by the
+established-domain-age signal from Milestone 13), `twitter.com/anthropicai`
+71.4% (also still rescued), real phishing URLs unaffected (paypal
+lookalike still 99.3%). 27/27 tests passing.
+
+**Also added this milestone**: a small shared `TTLCache`
+(`backend/app/threat_intel/cache.py`, ~25 lines) to avoid redundant
+network lookups on repeat scans of the same URL/domain -- `urlhaus.py`
+caches by full URL with a 15-minute TTL (blocklists change often, but the
+same page commonly gets scanned twice in quick succession by the
+background worker + popup), `domain_age.py` caches by registrable domain
+with a 24-hour TTL (a domain's age never changes, so this is where the
+real savings are). Confirmed live: first lookup ~1-3s, cached lookups
+~0.000s. 3 new unit tests for the cache class itself (store/retrieve,
+missing key, TTL expiry) -- no network calls involved, deterministic.
+
+**Also**: widened the dashboard layout (`max-w-4xl` → `max-w-7xl` in
+`App.jsx`, and the URL/Reason column truncation from `max-w-xs` to
+`max-w-md` in `HistoryTable.jsx`) -- the table had grown to 7 columns
+since Milestone 13 added domain age, and was visibly cramped while the
+page had unused width on a normal screen.
+
 ## Milestone 13 — RDAP domain-age signal (done, 2026-08-03)
 
 The last open item from Milestone 8's false-positive investigation was a
@@ -518,7 +585,14 @@ signal (Milestone 13, above) resolved the last open residual false-positive
 case (`twitter.com/anthropicai`) and the previously-known one
 (`github.com/anthropics`). Persistence, `/history`, `/reports`, the
 extension popup, and the dashboard's history table all carry the full
-7-field breakdown now. 24 backend/ml tests passing.
+7-field breakdown now. Both lookups are also cached (`TTLCache`, Milestone
+14) to avoid redundant network calls on repeat scans. The ML model itself
+is unchanged in complexity throughout all of this -- still the same
+17-feature lexical XGBoost classifier; every fix has been to the synthetic
+training-data generator (`ml/prepare_dataset.py`), not the model. Currently
+91.77% acc / 0.9164 F1 (manually kept over Random Forest's narrowly-higher
+0.9169 -- see Milestone 14) after the digit-ratio fix. 27 backend/ml tests
+passing.
 
 ## Previous project status snapshot (as of end of day 2026-08-01)
 

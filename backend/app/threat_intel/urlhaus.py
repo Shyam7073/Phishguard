@@ -11,6 +11,12 @@ This is a best-effort signal, not a dependency /scan can block on: a missing
 key, network error, or timeout all fall back to "unknown" so a slow,
 unreachable, or unconfigured URLhaus never prevents a verdict from coming
 back.
+
+Results are cached for 15 minutes, keyed by the full URL -- short, because
+the blocklist itself changes often and a stale "not_listed" would be worse
+than a redundant lookup. Still worth it: the same URL routinely gets
+scanned twice in quick succession (background worker + on-demand popup
+scan hitting the same page), which this catches.
 """
 
 import os
@@ -18,14 +24,29 @@ import os
 import httpx
 from dotenv import load_dotenv
 
+from backend.app.threat_intel.cache import TTLCache
+
 load_dotenv()
 
 URLHAUS_API_URL = "https://urlhaus-api.abuse.ch/v1/url/"
 TIMEOUT_SECONDS = 4.0
+CACHE_TTL_SECONDS = 15 * 60
+
+_cache = TTLCache(ttl_seconds=CACHE_TTL_SECONDS)
 
 
 async def check_urlhaus(url: str) -> str:
     """Returns "listed", "not_listed", or "unknown" (lookup failed)."""
+    cached = _cache.get(url)
+    if cached is not None:
+        return cached
+
+    result = await _lookup_urlhaus(url)
+    _cache.set(url, result)
+    return result
+
+
+async def _lookup_urlhaus(url: str) -> str:
     auth_key = os.environ.get("URLHAUS_AUTH_KEY")
     if not auth_key:
         return "unknown"

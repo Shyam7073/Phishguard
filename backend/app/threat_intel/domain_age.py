@@ -17,6 +17,12 @@ out on both `github.com` and `twitter.com` in live testing). Fixed by
 caching one `DNSClient` at module level (bootstrap fetched once, lazily, on
 first use) and reusing it -- every call after the first is then a single
 RDAP round trip, same shape as the URLhaus call.
+
+Results are also cached for 24 hours, keyed by registrable domain (not the
+full URL -- age is a property of the domain, so every path on the same
+domain shares one entry). Long TTL is safe here: a domain's creation date
+never changes, and its age bucket only matters near the 30/365-day
+boundaries.
 """
 
 import asyncio
@@ -26,12 +32,18 @@ import httpx
 import tldextract
 import whodap
 
+from backend.app.threat_intel.cache import TTLCache
+
 TIMEOUT_SECONDS = 4.0
 NEW_DOMAIN_THRESHOLD_DAYS = 30
 ESTABLISHED_DOMAIN_THRESHOLD_DAYS = 365
+CACHE_TTL_SECONDS = 24 * 60 * 60
 
 _client: whodap.DNSClient | None = None
 _client_lock = asyncio.Lock()
+# Keyed by registrable domain, not the full URL -- age is a property of the
+# domain, so /login and /account on the same domain share one cache entry.
+_cache = TTLCache(ttl_seconds=CACHE_TTL_SECONDS)
 
 
 async def _get_client() -> whodap.DNSClient:
@@ -53,10 +65,21 @@ async def check_domain_age(url: str) -> dict:
     if not extracted.domain or not extracted.suffix:
         return {"domain_age_days": None, "domain_age_status": "unknown"}
 
+    cache_key = f"{extracted.domain}.{extracted.suffix}"
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    result = await _lookup_domain_age(extracted.domain, extracted.suffix)
+    _cache.set(cache_key, result)
+    return result
+
+
+async def _lookup_domain_age(domain: str, suffix: str) -> dict:
     try:
         client = await asyncio.wait_for(_get_client(), timeout=TIMEOUT_SECONDS)
         response = await asyncio.wait_for(
-            client.aio_lookup(extracted.domain, extracted.suffix),
+            client.aio_lookup(domain, suffix),
             timeout=TIMEOUT_SECONDS,
         )
     except (whodap.errors.WhodapError, NotImplementedError, httpx.HTTPError, TimeoutError):
