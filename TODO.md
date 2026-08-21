@@ -249,8 +249,13 @@ Considered, briefly deferred, then dropped outright. Not planned anymore.
       wide screens
 
 ## Next up
-- [ ] Final README pass, screenshots/demo for resume (still last)
-- [ ] LICENSE file has a placeholder `<Your Name>` — replace with your actual name.
+- [x] Screenshots for the README — `docs/screenshots/dashboard.png` (seeded
+      5 varied scans: real search URL, fake PayPal lookalike, IP-address
+      login URL, the fixed GitHub-commit case, the domain-age-rescued
+      `twitter.com/anthropicai` case) and `docs/screenshots/popup.png`
+      (extension loaded on a clean second Chrome profile to avoid leaking
+      personal bookmarks into a public repo image)
+- [ ] Final README pass for resume
 - [ ] Ask user to visually confirm the extension popup's new domain-age
       badge through the actual loaded Chrome extension (known automation
       limitation on `chrome-extension://` pages)

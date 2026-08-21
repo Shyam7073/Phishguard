@@ -14,11 +14,6 @@ The point isn't a single confidence number — it's the *reason* behind it:
 
 ## Screenshots
 
-<!-- TODO: capture these before sharing. Suggested: run the backend + dashboard,
-     seed a few scans (a real search URL, a fake PayPal lookalike, an IP-address
-     login URL), then screenshot. Unload the extension first, or expect a
-     localhost:5173 row in the history table. -->
-
 | Dashboard | Extension popup |
 |---|---|
 | ![Dashboard](docs/screenshots/dashboard.png) | ![Popup](docs/screenshots/popup.png) |
@@ -212,7 +207,3 @@ Stated plainly rather than hidden — these are the honest edges of the design:
 All 14 milestones complete. See `TODO.md` for the task-level breakdown and
 `PROJECT_PROGRESS.md` for the full per-milestone engineering log, including
 every false-positive investigation and the reasoning behind each design call.
-
-## License
-
-MIT — see `LICENSE`.
