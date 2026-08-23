@@ -1,4 +1,4 @@
-export const API_BASE_URL = "http://127.0.0.1:8000";
+export const API_BASE_URL = "https://phishguard-api-yjr8.onrender.com";
 
 const CLIENT_ID_STORAGE_KEY = "phishguard_client_id";
 

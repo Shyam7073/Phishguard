@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { fetchHistory, getClientId } from "./api";
+import { API_BASE_URL, fetchHistory, getClientId } from "./api";
 import StatTiles from "./components/StatTiles";
 import VerdictBarChart from "./components/VerdictBarChart";
 import HistoryTable from "./components/HistoryTable";
@@ -67,8 +67,8 @@ function App() {
 
         {status === "error" && (
           <div className="rounded-lg border border-[#d03b3b]/30 bg-[#d03b3b]/10 px-4 py-3 text-sm text-[#d03b3b]">
-            Couldn't reach the PhishGuard backend at http://127.0.0.1:8000 — is
-            it running? ({error})
+            Couldn't reach the PhishGuard backend at {API_BASE_URL} — is it
+            running? ({error})
           </div>
         )}
 
