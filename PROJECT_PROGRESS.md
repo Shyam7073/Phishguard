@@ -1,6 +1,159 @@
 # PhishGuard — Project Progress
 
-Last updated: 2026-08-03
+Last updated: 2026-08-23
+
+## Milestone 15 — multi-tenant deployment: Postgres, per-user history, trusted-host bypass (done, 2026-08-23)
+
+Scope shift from "detection depth" (Milestones 10-14) to "share this with
+friends" — the previous architecture had zero user separation (one global
+`scan_records` table, no auth, no per-install identity) and lived only on
+`localhost`, both blockers for handing the extension to anyone else.
+
+**1. Multi-tenant separation via a per-install `client_id`.** No login system
+was added deliberately — a full auth system is disproportionate for a
+resume project shared with a handful of friends. Instead: `extension/
+client-id.js` generates one `crypto.randomUUID()` on first install, persists
+it in `chrome.storage.local` (shared via `importScripts` in `background.js`,
+a `<script>` tag in `popup.html`), and both scan call sites (`background.js`,
+`popup.js`) send it with every `POST /scan`. `ScanRecord` gained an indexed
+`client_id` column (`backend/app/db/models.py`); `/history` and `/reports`
+now require `client_id` as a query param and filter by it
+(`backend/app/api/history.py`, `reports.py`). The dashboard has no login
+either — `dashboard/src/api.js`'s `getClientId()` reads `client_id` from the
+URL (the extension popup's new "View my dashboard" link deep-links to
+`{DASHBOARD_URL}/?client_id=...`) and persists it to `localStorage` for
+later visits; `App.jsx` shows an explicit "open this from the extension
+popup" message rather than silently showing nothing (or worse, everyone's
+data) if no `client_id` is present. Explicitly documented as identification,
+not authentication: clearing extension storage or reinstalling orphans the
+old history under a dead `client_id`, accepted as a fine trade-off at this
+scale. New test (`test_history_only_returns_own_client_id`) proves one
+client's `/history` never returns another's rows.
+
+**2. SQLite → Postgres (Neon), because of *where* this needed to run, not
+scale.** Free hosts like Render wipe local disk on every idle spin-down/
+redeploy (no persistent volume on the free tier) — a SQLite file living next
+to the backend code would reset to empty on essentially every real session
+for a low-traffic personal project. `backend/app/db/database.py` now reads
+`DATABASE_URL` (a Neon connection string) when set, falling back to the
+original local SQLite file when it's unset, so local dev is unchanged.
+Neon's **pooled** connection string is used (not the direct one) — free-tier
+Postgres has a low direct-connection cap, and a serverless-style backend
+opening a fresh connection per request needs PgBouncer pooling to stay
+under it; confirmed both direct and pooled connection strings work, pooled
+kept for production. Verified live end-to-end multiple times: scans posted
+through the real API landed in Neon (queried directly via `SELECT`,
+bypassing the API, to confirm — not just trusting a 200 response).
+
+**3. Two real false-positive classes found while smoke-testing the deployed
+stack** (both diagnosed with evidence, neither one fixed by retraining —
+user explicitly declined a retrain this round, so both are documented as
+known limitations plus a non-ML mitigation instead):
+
+- **`http://` scheme is a 100%-confidence blind spot.** `is_https` is the
+  model's single strongest feature (30% importance). `ml/prepare_dataset.py`
+  hardcodes every legitimate training URL to `https://` with zero
+  exceptions — so the model never saw *one* legitimate `http://` example,
+  and learned an absolute rule (not "http is suspicious," but "http is
+  never legitimate"). Confirmed: `http://google.com/` scores 99.95%
+  phishing while `https://google.com/` scores 15.0%, identical URL
+  otherwise. Low real-world risk day to day since `background.js` only
+  scans on `tabs.onUpdated` "complete," by which point Chrome has already
+  followed most http→https redirects — but any URL a user *actually*
+  browses on plain HTTP (legacy internal tools, local devices) will
+  misfire on scheme alone. Not retrained; documented here instead.
+- **Free PaaS subdomains (Vercel/Render/Netlify/...) structurally resemble
+  phishing URLs.** These platforms are registered on the Public Suffix
+  List, so `tldextract` treats `your-project.vercel.app` as having
+  `num_subdomains == 1` with the project name as a "subdomain" — lexically
+  identical to the classic phishing pattern of a brand name squatted on
+  free/compromised hosting (`paypal-secure-login.weebly.com`-style), which
+  the model correctly learned to distrust. Tested empirically across 8
+  project-name variants and 10 different free hosts before concluding this
+  is real and structural, not a naming fix: every Vercel/Render/Netlify
+  candidate scored 53-96% phishing regardless of hyphenation, while
+  GitHub Pages/Cloudflare Pages/Firebase's `web.app`/Railway all scored
+  under 44% for the identical name (`phishguard.web.app` 43.7% vs
+  `phishguard.vercel.app` 52.9%, `phishguard.up.railway.app` 4.7%) — the
+  registered-suffix pattern itself is the driver, not the app name. Domain
+  age can't rescue this either: RDAP has no registration record for a
+  platform subdomain (only the platform's own apex domain is independently
+  registered), so the lookup returns "unknown," never "established."
+
+**4. Fix for both, deliberately not ML-based: `backend/app/trusted_hosts.py`,
+a hostname allowlist checked before the model runs.** `is_trusted_host()`
+always trusts `localhost`/`127.0.0.1`, plus whatever hostnames are listed in
+the `TRUSTED_HOSTS` env var (comma-separated, e.g. the deployed dashboard's
+hostname). `POST /scan` (`backend/app/api/scan.py`) checks this first — a
+trusted hostname skips `predict()`, `check_urlhaus()`, and `check_domain_age()`
+entirely (not just overriding their result; a monkeypatch-based test
+(`test_scan_trusted_host_bypasses_model`) asserts each of the three raises
+if called, proving a genuine bypass) and returns a fixed `is_phishing: False,
+confidence: 1.0` verdict. `ScanResponse`'s `ml_score`/`urlhaus_status`/
+`domain_age_status` were loosened to nullable to match — a trusted-host scan
+honestly reports "not checked" (`null`) rather than a faked score, mirroring
+the nullability `ScanRecordOut` already had for pre-URLhaus/pre-RDAP rows.
+Considered and rejected: checking this client-side in the extension instead
+— rejected because the extension has no "model" to skip (inference is
+entirely server-side), the check would need duplicating across both
+`background.js` and `popup.js`, any non-extension caller of `/scan` (curl,
+the dashboard's own future needs) would stay unprotected, and changing the
+trusted list would require every already-installed friend's copy of the
+extension to be reloaded rather than a one-line env var change on the
+already-running backend. Verdict reason text initially read "Trusted
+first-party PhishGuard host — not run through the model" (66 chars);
+shortened to "Trusted PhishGuard host" (24 chars) after it visibly
+overflowed the extension popup's 260px width.
+
+**5. Actual deployment, verified end-to-end at every hop** (backend →
+Render, dashboard → Vercel, DB → Neon — no Docker, consistent with the
+project's standing "no Docker" scope decision):
+- **Deployment blocker found and fixed before deploying**: `ml/models/
+  model.joblib` was gitignored from Milestone 4 onward (`.gitignore`'s
+  broad `ml/models/*.joblib` rule) and had *never* been pushed to GitHub.
+  `backend/app/ml_service/predictor.py` loads it at import time with no
+  fallback, so deploying as-is would have crashed the app on startup.
+  Fixed with a narrow `!ml/models/model.joblib` exception (635KB, trivial
+  to track) rather than untracking the whole rule, since the raw/processed
+  training data genuinely should stay out of git.
+- Render: web service built from repo root (not `backend/` — every module
+  imports as `backend.app....`, so the working directory has to stay at
+  the repo root, same reasoning as `ml/train.py`'s "run as a module from
+  the repo root" convention), `pip install -r backend/requirements.txt`,
+  `uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT`,
+  `DATABASE_URL`/`URLHAUS_AUTH_KEY`/`TRUSTED_HOSTS` as env vars. Live at
+  `https://phishguard-api-yjr8.onrender.com`.
+- Vercel: scoped to the `dashboard/` subfolder directly (Vercel supports
+  subfolder root directories cleanly, unlike Render/Python's import
+  constraint), auto-detected Vite framework preset. Live at
+  `https://phishguard-gray.vercel.app`.
+- Verified per-hop, not just "it loaded": deployed `/health` returns 200;
+  a real scan through the deployed API correctly flags a lookalike phishing
+  URL and correctly clears a legitimate one (RDAP/URLhaus both live and
+  working against real domains); `/history` scoping confirmed with two
+  different `client_id`s, each seeing only their own rows; CORS confirmed
+  working end-to-end from the actual Vercel origin (`Origin` header sent
+  explicitly via `curl`, not assumed from `allow_origins=["*"]`); the
+  deployed dashboard's own URL confirmed bypassing the model via
+  `TRUSTED_HOSTS` (`ml_score`/`urlhaus_status`/`domain_age_status` all
+  `null` in the response, proving skip not luck). One transient 500 hit
+  during CORS testing on the very first request after Render's free-tier
+  cold start — retried clean 3x immediately after, concluded cold-start/
+  connection-pool warm-up, not a real bug.
+- Distribution: not published to the Chrome Web Store (avoids the $5 fee +
+  review process for a resume project). Friends install via
+  `chrome://extensions` → Developer mode → Load unpacked, pointed at a zip
+  of just the `extension/` folder (not the whole repo) — each install
+  generates its own `client_id` on first run and gets isolated history
+  against the same shared deployed backend/dashboard.
+
+**Result**: the project now runs as a real shared multi-user deployment
+instead of a single-machine localhost demo, with the false-positive classes
+found along the way handled honestly (documented, non-ML-mitigated) rather
+than chased with more synthetic-data tuning, consistent with the project's
+standing rule against hand-tuning data to defeat specific adversarial
+examples. 20/20 backend tests passing (2 new: client-id isolation,
+trusted-host bypass).
 
 ## Milestone 14 — digit-ratio false positive fix + lookup caching (done, 2026-08-03)
 
@@ -574,7 +727,24 @@ round 2, XGBoost won the automatic F1 comparison outright (0.9205 vs RF's
   signal), not a data artifact, and not worth chasing further by hand-
   tuning synthetic data to specific adversarial examples.
 
-## Current project status (as of 2026-08-03)
+## Current project status (as of 2026-08-23)
+
+**Live and deployed, multi-tenant.** Backend on Render
+(`https://phishguard-api-yjr8.onrender.com`) backed by Neon Postgres,
+dashboard on Vercel (`https://phishguard-gray.vercel.app`). Every scan is
+tagged with a per-install `client_id` (generated by the extension, stored in
+`chrome.storage.local`); `/history`/`/reports` are scoped to it, so multiple
+friends running the extension against the same deployed backend each get
+their own isolated history, not one shared global list. A
+`TRUSTED_HOSTS`-based allowlist (`backend/app/trusted_hosts.py`) skips the
+ML/URLhaus/RDAP pipeline entirely for known first-party hosts (the deployed
+dashboard, `localhost`) — added after finding two real false-positive
+classes (`http://` scheme, free-PaaS-subdomain shape — see Milestone 15)
+that the user chose not to fix via retraining. Local dev is unaffected:
+`DATABASE_URL` unset still falls back to a local SQLite file. 20/20 backend
+tests passing.
+
+## Previous project status (as of 2026-08-03)
 
 The FastAPI backend now combines **three signals** into one explainable
 verdict via `POST /scan`: the ML phishing probability, a live URLhaus
@@ -725,14 +895,20 @@ ExportButton}.jsx`). `.env` (gitignored) holds `URLHAUS_AUTH_KEY`.
 
 ## Next milestone
 
-**Done as of 2026-08-03**: the RDAP domain-age signal planned here shipped
-as Milestone 13 (see top of this file) — resolved both previously-open
-residual cases. What's left is no longer feature work: a final README pass
-+ screenshots/demo for the resume, and replacing the `<Your Name>`
-placeholder in `LICENSE`. Typosquat/brand-similarity feature was
-considered, briefly deferred, then dropped outright (2026-07-31) — not
-planned. See `TODO.md` for the concrete task breakdown and current status
-of everything.
+**Done as of 2026-08-23**: multi-tenant deployment shipped as Milestone 15
+(see top of this file) — Postgres/Neon, per-`client_id` history isolation,
+trusted-host bypass, and a real Render + Vercel deployment, all verified
+end-to-end. What's left: a README/screenshot refresh reflecting the
+deployed URLs (the current screenshots are from the localhost-only setup),
+and replacing the `<Your Name>` placeholder in `LICENSE`. Typosquat/
+brand-similarity feature was considered, briefly deferred, then dropped
+outright (2026-07-31) — not planned. Retraining to fix the two
+false-positive classes found in Milestone 15 (`http://` scheme,
+free-PaaS-subdomain shape) was considered and explicitly declined by the
+user — documented as known limitations instead, mitigated non-ML via
+`TRUSTED_HOSTS` where it actually matters (the project's own dashboard).
+See `TODO.md` for the concrete task breakdown and current status of
+everything.
 
 ## Important design decisions made today
 
@@ -753,6 +929,11 @@ of everything.
    locally for convenience.
 5. **SQLite now, Postgres-ready later.** Using SQLAlchemy as the ORM so the
    only future change needed to move to Postgres is the connection string.
+   **Followed through 2026-08-23 (Milestone 15)** — moved to Neon Postgres
+   for the deployed backend (SQLite has no persistent disk on free hosts
+   like Render), local dev still falls back to SQLite when `DATABASE_URL`
+   is unset, exactly the "just swap the connection string" change predicted
+   here.
 6. **Manifest V3 for the Chrome extension**, using a background service
    worker (current Chrome standard, not the deprecated persistent background
    page model).
@@ -776,6 +957,13 @@ of everything.
    Docker/deployment (the rest of what "Milestone 9" originally meant)
    is explicitly still out of scope — this reversal is about detection
    depth, not deployment infra.
+   **Deployment scope also reversed, 2026-08-23 (Milestone 15)** — the
+   project moved from "local-only, out of scope" to actually deployed
+   (Render + Vercel + Neon), driven by the user wanting to share the
+   extension with friends rather than a demo/interview need. Docker
+   specifically stayed out of scope throughout — both Render and Vercel
+   deploy directly from the repo (buildpacks), no Dockerfile was written
+   or needed.
 
 ## Reference
 

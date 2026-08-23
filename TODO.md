@@ -248,6 +248,53 @@ Considered, briefly deferred, then dropped outright. Not planned anymore.
       domain-age column) was cramped while the page had unused width on
       wide screens
 
+## Milestone 15 — multi-tenant deployment (done, 2026-08-23)
+- [x] Per-install `client_id`: `extension/client-id.js` generates/stores a
+      UUID, sent with every `/scan`; `ScanRecord` gained an indexed
+      `client_id` column; `/history` and `/reports` now require and filter
+      by `client_id`; dashboard reads `client_id` from URL/`localStorage`
+      (`getClientId()` in `dashboard/src/api.js`), shows an explicit
+      "open from the extension popup" message if absent
+- [x] Extension popup gained a "View my dashboard" link
+      (`{DASHBOARD_URL}/?client_id=...`)
+- [x] New test: `test_history_only_returns_own_client_id` — proves one
+      client's history never leaks another's
+- [x] SQLite → Neon Postgres for the deployed backend (`DATABASE_URL` env
+      var, local dev unaffected — falls back to SQLite when unset); pooled
+      Neon connection string used, not direct (free-tier connection cap)
+- [x] Diagnosed two real false-positive classes while smoke-testing the
+      deployed stack (both documented, neither fixed via retrain — user
+      declined): `http://` scheme is a 100%-confidence blind spot (legit
+      training data is 100% `https://`, zero counterexamples); free PaaS
+      subdomains (Vercel/Render/Netlify) structurally resemble phishing
+      URLs (public-suffix-listed platform domains → `num_subdomains == 1`
+      on the project name, same lexical shape as brand-squatting on free
+      hosting) — tested 8 names x 10 hosts to confirm it's structural, not
+      a naming issue
+- [x] `backend/app/trusted_hosts.py` — `TRUSTED_HOSTS` env var allowlist,
+      checked before the model runs; a trusted host skips `predict()`/
+      `check_urlhaus()`/`check_domain_age()` entirely (test asserts each
+      raises if called, proving genuine bypass, not luck). Always trusts
+      `localhost`/`127.0.0.1`. `ScanResponse` fields loosened to nullable
+      to honestly report "not checked" instead of a faked score
+- [x] Deployment blocker found+fixed: `ml/models/model.joblib` was
+      gitignored since Milestone 4, never pushed — would have crashed the
+      deployed app on startup. Fixed with a narrow `.gitignore` exception
+- [x] Deployed: backend → Render (`phishguard-api-yjr8.onrender.com`,
+      repo-root build, `DATABASE_URL`/`URLHAUS_AUTH_KEY`/`TRUSTED_HOSTS`
+      env vars), DB → Neon Postgres, dashboard → Vercel
+      (`phishguard-gray.vercel.app`, scoped to `dashboard/` subfolder)
+- [x] Verified end-to-end at every hop: deployed `/health`, a real scan
+      through the deployed API (ML+URLhaus+RDAP all live), `/history`
+      isolation across two different `client_id`s, CORS from the real
+      Vercel origin, `TRUSTED_HOSTS` bypass on the deployed dashboard's own
+      URL (nulled-out ml_score/urlhaus_status/domain_age_status proving
+      skip, not luck)
+- [x] Extension's hardcoded URLs updated to the deployed backend/dashboard
+      (`background.js`, `popup.js`, `manifest.json` host_permissions) —
+      kept `localhost` entries alongside for continued local dev
+- [x] 20/20 backend tests passing
+
 ## Next up
 - [x] Screenshots for the README — `docs/screenshots/dashboard.png` (seeded
       5 varied scans: real search URL, fake PayPal lookalike, IP-address
@@ -255,12 +302,32 @@ Considered, briefly deferred, then dropped outright. Not planned anymore.
       `twitter.com/anthropicai` case) and `docs/screenshots/popup.png`
       (extension loaded on a clean second Chrome profile to avoid leaking
       personal bookmarks into a public repo image)
-- [ ] Final README pass for resume
+- [ ] Final README pass for resume — now also needs the deployed URLs +
+      multi-tenant architecture reflected (screenshots above predate
+      Milestone 15's deployment and are still accurate for the UI itself,
+      just not the "local-only" framing)
 - [ ] Ask user to visually confirm the extension popup's new domain-age
       badge through the actual loaded Chrome extension (known automation
       limitation on `chrome-extension://` pages)
+- [ ] Zip just `extension/` (not the whole repo) and share with friends for
+      real multi-user testing — each install should get its own isolated
+      history against the shared deployed backend
 
 ## Known issues / open items
+- **`http://` scheme is a 100%-confidence false-positive blind spot**
+  (found Milestone 15). Training data has zero legitimate `http://`
+  examples (see module docstring in `ml/prepare_dataset.py`), so the model
+  learned an absolute rule, not a probabilistic one. Not retrained (user
+  declined) — accepted as a known limitation. Low real-world hit rate since
+  `background.js` scans post-redirect, but genuine plain-HTTP sites would
+  still misfire.
+- **Free PaaS subdomains (Vercel/Render/Netlify/...) look structurally
+  like phishing URLs** to the model (found Milestone 15) — public-suffix-
+  listed platform domains make `tldextract` read the project name as a
+  "subdomain," the same lexical shape as brand-squatting on free hosting.
+  Not retrained (user declined). Mitigated where it actually matters (the
+  project's own deployed dashboard) via `TRUSTED_HOSTS`
+  (`backend/app/trusted_hosts.py`), not via the model.
 - **Resolved by Milestone 13's RDAP domain-age signal**: the residual
   bare-domain-plus-generic-path false positives (`github.com/anthropics`
   ~80%, `twitter.com/anthropicai` ~55%) are now correctly rescued to

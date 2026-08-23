@@ -108,6 +108,7 @@ artifact being removed, so the lower number is the more honest one.
 | `ml/` | Dataset prep, feature engineering, training/evaluation (offline only) |
 | `backend/` | FastAPI service: `/scan`, `/history`, `/reports`, `/health` |
 | `backend/app/threat_intel/` | URLhaus + RDAP lookups, shared TTL cache |
+| `backend/app/trusted_hosts.py` | `TRUSTED_HOSTS` allowlist, bypasses the model for known first-party hosts |
 | `extension/` | Chrome extension (Manifest V3), background worker + popup |
 | `dashboard/` | React + Tailwind dashboard |
 
@@ -123,15 +124,25 @@ matplotlib.
 make setup   # creates .venv, installs ml + backend + dev dependencies
 ```
 
-Create a `.env` in the repo root (gitignored) with a free key from
-[auth.abuse.ch](https://auth.abuse.ch):
+Create a `.env` in the repo root (gitignored):
 
 ```
-URLHAUS_AUTH_KEY=your_key_here
+URLHAUS_AUTH_KEY=your_key_here    # free key from auth.abuse.ch
+DATABASE_URL=                     # optional, e.g. a Neon Postgres connection
+                                   # string; leave unset for local dev to use
+                                   # a local SQLite file instead
+TRUSTED_HOSTS=                    # optional, comma-separated hostnames that
+                                   # skip ML/URLhaus/RDAP entirely (e.g. this
+                                   # project's own deployed dashboard, which
+                                   # otherwise structurally resembles
+                                   # phishing on free hosting -- see
+                                   # PROJECT_PROGRESS.md Milestone 15).
+                                   # localhost/127.0.0.1 are always trusted.
 ```
 
-Without it, URLhaus lookups degrade to `"unknown"` and the verdict falls back
-to ML + domain age. The app still runs.
+Without `URLHAUS_AUTH_KEY`, URLhaus lookups degrade to `"unknown"` and the
+verdict falls back to ML + domain age. The app still runs with none of these
+set — same as local dev before Milestone 15.
 
 ### Train the model
 
@@ -164,6 +175,12 @@ cd dashboard && npm install && npm run dev
 With the backend running: open `chrome://extensions`, enable Developer
 mode, click Load unpacked, select the `extension/` folder. See
 `extension/README.md`.
+
+By default `extension/background.js`/`popup.js` point at the deployed
+Render backend and Vercel dashboard (see Deployment above), not
+`localhost` — switch `API_BASE`/`DASHBOARD_URL` back to
+`http://127.0.0.1:8000`/the local Vite dev server URL for local-only
+testing.
 
 ## Testing
 
@@ -201,11 +218,48 @@ Stated plainly rather than hidden, these are the honest edges of the design:
 - Lexical features can't see content. No page fetch, no DOM inspection, no
   favicon/visual similarity. This is deliberate: safely fetching arbitrary,
   possibly-malicious pages is a much bigger problem than it looks.
-- Local-only by design. No Docker, no deployment, permissive CORS
-  (`allow_origins=["*"]`). Fine for a local project, not a hardened API.
+- `http://` (not `https://`) is a 100%-confidence false-positive blind spot.
+  Training data has zero legitimate `http://` examples, so the model learned
+  an absolute rule off zero counterexamples, not a probabilistic one. Known,
+  not retrained by choice — see `PROJECT_PROGRESS.md` Milestone 15.
+- Free PaaS subdomains (`*.vercel.app`, `*.onrender.com`, `*.netlify.app`)
+  score as phishing regardless of naming — they're structurally identical,
+  lexically, to brand-squatting on free hosting. Mitigated for this
+  project's own deployed dashboard via a `TRUSTED_HOSTS` allowlist
+  (`backend/app/trusted_hosts.py`), not via the model — same Milestone 15.
+- No Docker. Backend deploys to Render and the dashboard to Vercel directly
+  from the repo (buildpacks, no Dockerfile) — a deliberate scope decision,
+  not an oversight.
+- CORS is permissive (`allow_origins=["*"]`) and there's no real
+  authentication — `client_id` (see Deployment below) is identification,
+  not auth. Acceptable for a resume project shared with friends, not a
+  hardened public API.
+
+## Deployment
+
+Live, multi-tenant, no Docker:
+
+| Component | Platform | URL |
+|---|---|---|
+| Backend (FastAPI) | Render | `phishguard-api-yjr8.onrender.com` |
+| Database | Neon (Postgres) | — |
+| Dashboard (React) | Vercel | `phishguard-gray.vercel.app` |
+
+No login system. Each extension install generates a random `client_id`
+(`crypto.randomUUID()`, stored in `chrome.storage.local`) on first run and
+sends it with every scan; `/history`/`/reports` are filtered by it, so
+multiple people running the extension against the same deployed backend
+each see only their own scan history. This is identification, not
+authentication — clearing extension storage or reinstalling generates a new
+`client_id` and orphans the old history, an accepted trade-off at this
+scale. See `PROJECT_PROGRESS.md` Milestone 15 for the full design rationale,
+including two real false-positive classes found while deploying (`http://`
+scheme, free-PaaS-subdomain shape) and why they were mitigated instead of
+retrained.
 
 ## Status
 
-All 14 milestones complete. See `TODO.md` for the task-level breakdown and
-`PROJECT_PROGRESS.md` for the full per-milestone engineering log, including
-every false-positive investigation and the reasoning behind each design call.
+All 15 milestones complete, deployed and live (see above). See `TODO.md`
+for the task-level breakdown and `PROJECT_PROGRESS.md` for the full
+per-milestone engineering log, including every false-positive investigation
+and the reasoning behind each design call.

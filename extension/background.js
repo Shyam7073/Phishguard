@@ -4,7 +4,7 @@
 
 importScripts("client-id.js");
 
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = "https://phishguard-api-yjr8.onrender.com";
 
 function isScannable(url) {
   return Boolean(url) && (url.startsWith("http://") || url.startsWith("https://"));
