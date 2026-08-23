@@ -1,7 +1,7 @@
 import csv
 import io
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
@@ -13,14 +13,22 @@ router = APIRouter()
 
 
 @router.get("/reports")
-def export_reports_csv(db: Session = Depends(get_db)) -> StreamingResponse:
-    records = db.query(ScanRecord).order_by(desc(ScanRecord.scanned_at)).all()
+def export_reports_csv(
+    client_id: str = Query(..., min_length=1), db: Session = Depends(get_db)
+) -> StreamingResponse:
+    records = (
+        db.query(ScanRecord)
+        .filter(ScanRecord.client_id == client_id)
+        .order_by(desc(ScanRecord.scanned_at))
+        .all()
+    )
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow(
         [
             "id",
+            "client_id",
             "url",
             "is_phishing",
             "confidence",
@@ -36,6 +44,7 @@ def export_reports_csv(db: Session = Depends(get_db)) -> StreamingResponse:
         writer.writerow(
             [
                 record.id,
+                record.client_id,
                 record.url,
                 record.is_phishing,
                 record.confidence,

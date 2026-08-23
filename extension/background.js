@@ -2,6 +2,8 @@
 // navigation finishes, and caches the verdict in chrome.storage.local so
 // the popup can show it instantly without re-scanning on every click.
 
+importScripts("client-id.js");
+
 const API_BASE = "http://127.0.0.1:8000";
 
 function isScannable(url) {
@@ -9,10 +11,11 @@ function isScannable(url) {
 }
 
 async function scanUrl(url) {
+  const clientId = await getOrCreateClientId();
   const response = await fetch(`${API_BASE}/scan`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url }),
+    body: JSON.stringify({ url, client_id: clientId }),
   });
   if (!response.ok) {
     throw new Error(`Backend returned ${response.status}`);

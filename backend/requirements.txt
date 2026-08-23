@@ -3,6 +3,7 @@ fastapi
 uvicorn[standard]
 pydantic
 sqlalchemy
+psycopg2-binary  # Postgres driver for the Neon-hosted DB
 python-dotenv
 tldextract
 httpx  # async client for the URLhaus threat-intel lookup in /scan

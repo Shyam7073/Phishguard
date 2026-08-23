@@ -10,6 +10,9 @@ class ScanRecord(Base):
     __tablename__ = "scan_records"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Per-install ID the extension generates and stores in chrome.storage.local.
+    # Not real auth -- just enough to keep each friend's history separate.
+    client_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     url: Mapped[str] = mapped_column(String, nullable=False)
     is_phishing: Mapped[bool] = mapped_column(Boolean, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)

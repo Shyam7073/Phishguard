@@ -1,18 +1,20 @@
 import { useEffect, useState, useCallback } from "react";
-import { fetchHistory } from "./api";
+import { fetchHistory, getClientId } from "./api";
 import StatTiles from "./components/StatTiles";
 import VerdictBarChart from "./components/VerdictBarChart";
 import HistoryTable from "./components/HistoryTable";
 import ExportButton from "./components/ExportButton";
 
 function App() {
+  const [clientId] = useState(getClientId);
   const [records, setRecords] = useState([]);
-  const [status, setStatus] = useState("loading");
+  const [status, setStatus] = useState(clientId ? "loading" : "no-client-id");
   const [error, setError] = useState(null);
 
   const loadHistory = useCallback(() => {
+    if (!clientId) return;
     setStatus("loading");
-    fetchHistory(100)
+    fetchHistory(clientId, 100)
       .then((data) => {
         setRecords(data);
         setStatus("ready");
@@ -21,7 +23,7 @@ function App() {
         setError(err.message);
         setStatus("error");
       });
-  }, []);
+  }, [clientId]);
 
   useEffect(() => {
     loadHistory();
@@ -51,9 +53,17 @@ function App() {
             >
               Refresh
             </button>
-            <ExportButton />
+            <ExportButton clientId={clientId} />
           </div>
         </header>
+
+        {status === "no-client-id" && (
+          <div className="rounded-lg border border-[rgba(11,11,11,0.10)] dark:border-[rgba(255,255,255,0.10)] bg-black/5 dark:bg-white/5 px-4 py-3 text-sm text-[#0b0b0b] dark:text-white">
+            No client ID found. Open this dashboard from the PhishGuard
+            extension popup's "View my dashboard" link to see your scan
+            history.
+          </div>
+        )}
 
         {status === "error" && (
           <div className="rounded-lg border border-[#d03b3b]/30 bg-[#d03b3b]/10 px-4 py-3 text-sm text-[#d03b3b]">
@@ -62,7 +72,7 @@ function App() {
           </div>
         )}
 
-        {status !== "error" && (
+        {status !== "error" && status !== "no-client-id" && (
           <>
             <StatTiles total={total} phishingCount={phishingCount} legitCount={legitCount} />
             <VerdictBarChart total={total} phishingCount={phishingCount} legitCount={legitCount} />

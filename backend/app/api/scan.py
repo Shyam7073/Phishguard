@@ -1,3 +1,5 @@
+from urllib.parse import urlparse
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -7,26 +9,43 @@ from backend.app.ml_service.predictor import predict
 from backend.app.schemas.scan import ScanRequest, ScanResponse
 from backend.app.threat_intel.domain_age import check_domain_age
 from backend.app.threat_intel.urlhaus import check_urlhaus
+from backend.app.trusted_hosts import is_trusted_host
 from backend.app.verdict import combine_verdict
 
 router = APIRouter()
 
+TRUSTED_HOST_VERDICT = {
+    "is_phishing": False,
+    "confidence": 1.0,
+    "verdict_reason": "Trusted first-party PhishGuard host — not run through the model",
+}
+
 
 @router.post("/scan", response_model=ScanResponse)
 async def scan_url(request: ScanRequest, db: Session = Depends(get_db)) -> ScanResponse:
-    ml_result = predict(request.url)
-    urlhaus_status = await check_urlhaus(request.url)
-    domain_age = await check_domain_age(request.url)
-    verdict = combine_verdict(
-        ml_result["phishing_probability"], urlhaus_status, domain_age["domain_age_status"]
-    )
+    hostname = urlparse(request.url).hostname
+
+    if is_trusted_host(hostname):
+        verdict = TRUSTED_HOST_VERDICT
+        ml_score = None
+        urlhaus_status = None
+        domain_age = {"domain_age_days": None, "domain_age_status": None}
+    else:
+        ml_result = predict(request.url)
+        urlhaus_status = await check_urlhaus(request.url)
+        domain_age = await check_domain_age(request.url)
+        verdict = combine_verdict(
+            ml_result["phishing_probability"], urlhaus_status, domain_age["domain_age_status"]
+        )
+        ml_score = ml_result["phishing_probability"]
 
     db.add(
         ScanRecord(
+            client_id=request.client_id,
             url=request.url,
             is_phishing=verdict["is_phishing"],
             confidence=verdict["confidence"],
-            ml_score=ml_result["phishing_probability"],
+            ml_score=ml_score,
             urlhaus_status=urlhaus_status,
             domain_age_days=domain_age["domain_age_days"],
             domain_age_status=domain_age["domain_age_status"],
@@ -39,7 +58,7 @@ async def scan_url(request: ScanRequest, db: Session = Depends(get_db)) -> ScanR
         url=request.url,
         is_phishing=verdict["is_phishing"],
         confidence=verdict["confidence"],
-        ml_score=ml_result["phishing_probability"],
+        ml_score=ml_score,
         urlhaus_status=urlhaus_status,
         domain_age_days=domain_age["domain_age_days"],
         domain_age_status=domain_age["domain_age_status"],

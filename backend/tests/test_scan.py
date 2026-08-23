@@ -1,5 +1,7 @@
 import backend.app.api.scan as scan_module
 
+CLIENT_ID = "test-client"
+
 
 def test_health(client):
     response = client.get("/health")
@@ -8,7 +10,7 @@ def test_health(client):
 
 
 def test_scan_returns_verdict(client):
-    response = client.post("/scan", json={"url": "http://google.com"})
+    response = client.post("/scan", json={"url": "http://google.com", "client_id": CLIENT_ID})
     assert response.status_code == 200
     body = response.json()
     assert body["url"] == "http://google.com"
@@ -22,13 +24,15 @@ def test_scan_returns_verdict(client):
 
 
 def test_scan_flags_ip_address_login_url(client):
-    response = client.post("/scan", json={"url": "http://192.168.1.1/login/verify-account"})
+    response = client.post(
+        "/scan", json={"url": "http://192.168.1.1/login/verify-account", "client_id": CLIENT_ID}
+    )
     assert response.status_code == 200
     assert response.json()["is_phishing"] is True
 
 
 def test_scan_rejects_empty_url(client):
-    response = client.post("/scan", json={"url": ""})
+    response = client.post("/scan", json={"url": "", "client_id": CLIENT_ID})
     assert response.status_code == 422
 
 
@@ -40,7 +44,7 @@ def test_scan_urlhaus_hit_overrides_ml_score(client, monkeypatch):
 
     # A URL the ML model alone would call legitimate -- URLhaus should still
     # force the verdict to phishing with high confidence.
-    response = client.post("/scan", json={"url": "http://google.com"})
+    response = client.post("/scan", json={"url": "http://google.com", "client_id": CLIENT_ID})
     assert response.status_code == 200
     body = response.json()
     assert body["is_phishing"] is True
@@ -55,7 +59,7 @@ def test_scan_urlhaus_unknown_falls_back_to_ml_only(client, monkeypatch):
 
     monkeypatch.setattr(scan_module, "check_urlhaus", _fake_unknown)
 
-    response = client.post("/scan", json={"url": "http://google.com"})
+    response = client.post("/scan", json={"url": "http://google.com", "client_id": CLIENT_ID})
     assert response.status_code == 200
     body = response.json()
     assert body["urlhaus_status"] == "unknown"
@@ -80,7 +84,9 @@ def test_scan_established_domain_rescues_borderline_phishing_call(client, monkey
 
     monkeypatch.setattr(scan_module, "check_domain_age", _fake_established)
 
-    response = client.post("/scan", json={"url": "http://github.com/anthropics"})
+    response = client.post(
+        "/scan", json={"url": "http://github.com/anthropics", "client_id": CLIENT_ID}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["is_phishing"] is False
@@ -100,7 +106,9 @@ def test_scan_established_domain_does_not_rescue_confident_phishing_call(client,
 
     monkeypatch.setattr(scan_module, "check_domain_age", _fake_established)
 
-    response = client.post("/scan", json={"url": "http://example.com/login"})
+    response = client.post(
+        "/scan", json={"url": "http://example.com/login", "client_id": CLIENT_ID}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["is_phishing"] is True
@@ -117,16 +125,39 @@ def test_scan_new_domain_is_annotated_but_not_auto_flagged(client, monkeypatch):
 
     monkeypatch.setattr(scan_module, "check_domain_age", _fake_new)
 
-    response = client.post("/scan", json={"url": "http://example.com"})
+    response = client.post("/scan", json={"url": "http://example.com", "client_id": CLIENT_ID})
     assert response.status_code == 200
     body = response.json()
     assert body["is_phishing"] is False
     assert "registered very recently" in body["verdict_reason"]
 
 
+def test_scan_trusted_host_bypasses_model(client, monkeypatch):
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("should not be called for a trusted host")
+
+    async def _async_fail_if_called(*args, **kwargs):
+        raise AssertionError("should not be called for a trusted host")
+
+    monkeypatch.setattr(scan_module, "predict", _fail_if_called)
+    monkeypatch.setattr(scan_module, "check_urlhaus", _async_fail_if_called)
+    monkeypatch.setattr(scan_module, "check_domain_age", _async_fail_if_called)
+
+    response = client.post(
+        "/scan", json={"url": "http://localhost:5173/", "client_id": CLIENT_ID}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["is_phishing"] is False
+    assert body["ml_score"] is None
+    assert body["urlhaus_status"] is None
+    assert body["domain_age_status"] is None
+    assert "Trusted" in body["verdict_reason"]
+
+
 def test_scan_domain_age_unknown_is_noted_in_reason(client):
     # Default conftest fake already returns "unknown" -- confirm it's
     # surfaced rather than silently ignored.
-    response = client.post("/scan", json={"url": "http://google.com"})
+    response = client.post("/scan", json={"url": "http://google.com", "client_id": CLIENT_ID})
     assert response.status_code == 200
     assert "domain age unavailable" in response.json()["verdict_reason"]

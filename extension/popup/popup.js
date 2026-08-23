@@ -4,12 +4,14 @@
 // before the extension did, or the background scan hasn't finished).
 
 const API_BASE = "http://127.0.0.1:8000";
+const DASHBOARD_URL = "http://localhost:5173";
 
 const statusEl = document.getElementById("status");
 const reasonEl = document.getElementById("reason");
 const confidenceEl = document.getElementById("confidence");
 const blocklistEl = document.getElementById("blocklist");
 const domainAgeEl = document.getElementById("domain-age");
+const dashboardLinkEl = document.getElementById("dashboard-link");
 
 const BLOCKLIST_LABELS = {
   listed: { text: "🚫 On URLhaus blocklist", className: "danger" },
@@ -65,10 +67,11 @@ function render(result) {
 }
 
 async function scanUrl(url) {
+  const clientId = await getOrCreateClientId();
   const response = await fetch(`${API_BASE}/scan`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url }),
+    body: JSON.stringify({ url, client_id: clientId }),
   });
   if (!response.ok) {
     throw new Error(`Backend returned ${response.status}`);
@@ -77,6 +80,9 @@ async function scanUrl(url) {
 }
 
 async function main() {
+  const clientId = await getOrCreateClientId();
+  dashboardLinkEl.href = `${DASHBOARD_URL}/?client_id=${clientId}`;
+
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
   if (!tab || !tab.url || !/^https?:\/\//.test(tab.url)) {

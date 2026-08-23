@@ -11,6 +11,14 @@ router = APIRouter()
 
 @router.get("/history", response_model=list[ScanRecordOut])
 def get_history(
-    limit: int = Query(50, ge=1, le=500), db: Session = Depends(get_db)
+    client_id: str = Query(..., min_length=1),
+    limit: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db),
 ) -> list[ScanRecord]:
-    return db.query(ScanRecord).order_by(desc(ScanRecord.scanned_at)).limit(limit).all()
+    return (
+        db.query(ScanRecord)
+        .filter(ScanRecord.client_id == client_id)
+        .order_by(desc(ScanRecord.scanned_at))
+        .limit(limit)
+        .all()
+    )
