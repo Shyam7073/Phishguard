@@ -16,6 +16,10 @@ ml/data/processed/*
 ml/models/*.pkl
 ml/models/*.joblib
 ml/models/*.onnx
+# The trained model IS tracked -- the backend loads it directly at runtime
+# (backend/app/ml_service/predictor.py), so it has to ship in the repo for
+# deployment to work, unlike the raw/processed training data above.
+!ml/models/model.joblib
 
 # --- Node / React ---
 node_modules/
