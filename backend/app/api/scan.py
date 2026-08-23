@@ -17,7 +17,7 @@ router = APIRouter()
 TRUSTED_HOST_VERDICT = {
     "is_phishing": False,
     "confidence": 1.0,
-    "verdict_reason": "Trusted first-party PhishGuard host — not run through the model",
+    "verdict_reason": "Trusted PhishGuard host",
 }
 
 
