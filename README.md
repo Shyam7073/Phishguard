@@ -28,7 +28,7 @@ The Chrome extension and the dashboard both talk to one FastAPI backend
 confidence, reason), and the scan gets saved to SQLite so it shows up in
 `/history` and `/reports`.
 
-### The three signals
+### The three signals-
 
 | Signal | Source | Cost |
 |---|---|---|
