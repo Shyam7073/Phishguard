@@ -23,12 +23,17 @@ full URL -- age is a property of the domain, so every path on the same
 domain shares one entry). Long TTL is safe here: a domain's creation date
 never changes, and its age bucket only matters near the 30/365-day
 boundaries.
+
+That reasoning only holds for a *successful* lookup, though. A failed one
+("unknown") is cached for 5 minutes instead: a creation date never changes,
+but a timeout is a property of that one moment, and caching it for 24 hours
+would mean a single slow RDAP call costs a domain its age signal for the
+rest of the day.
 """
 
 import asyncio
 from datetime import datetime, timezone
 
-import httpx
 import tldextract
 import whodap
 
@@ -38,6 +43,9 @@ TIMEOUT_SECONDS = 4.0
 NEW_DOMAIN_THRESHOLD_DAYS = 30
 ESTABLISHED_DOMAIN_THRESHOLD_DAYS = 365
 CACHE_TTL_SECONDS = 24 * 60 * 60
+FAILURE_CACHE_TTL_SECONDS = 5 * 60
+
+UNKNOWN_RESULT = {"domain_age_days": None, "domain_age_status": "unknown"}
 
 _client: whodap.DNSClient | None = None
 _client_lock = asyncio.Lock()
@@ -63,7 +71,7 @@ async def check_domain_age(url: str) -> dict:
     """
     extracted = tldextract.extract(url)
     if not extracted.domain or not extracted.suffix:
-        return {"domain_age_days": None, "domain_age_status": "unknown"}
+        return dict(UNKNOWN_RESULT)
 
     cache_key = f"{extracted.domain}.{extracted.suffix}"
     cached = _cache.get(cache_key)
@@ -71,30 +79,45 @@ async def check_domain_age(url: str) -> dict:
         return cached
 
     result = await _lookup_domain_age(extracted.domain, extracted.suffix)
-    _cache.set(cache_key, result)
+    failed = result["domain_age_status"] == "unknown"
+    _cache.set(cache_key, result, ttl_seconds=FAILURE_CACHE_TTL_SECONDS if failed else None)
     return result
 
 
 async def _lookup_domain_age(domain: str, suffix: str) -> dict:
+    # Deliberately broad, and deliberately covering the parsing below as
+    # well as the network calls. RDAP responses are not uniform across
+    # registries -- `to_whois_dict()` can raise, and `created_date` comes
+    # back as a string (rather than a datetime) from some of them. Every
+    # one of those is "we could not determine the age", not a reason to
+    # 500 a scan the ML model can still answer. (`Exception` rather than an
+    # explicit tuple also sidesteps asyncio.TimeoutError only being an alias
+    # for builtin TimeoutError on Python 3.11+. CancelledError is a
+    # BaseException, so real cancellation still propagates.)
     try:
         client = await asyncio.wait_for(_get_client(), timeout=TIMEOUT_SECONDS)
         response = await asyncio.wait_for(
             client.aio_lookup(domain, suffix),
             timeout=TIMEOUT_SECONDS,
         )
-    except (whodap.errors.WhodapError, NotImplementedError, httpx.HTTPError, TimeoutError):
-        return {"domain_age_days": None, "domain_age_status": "unknown"}
 
-    creation_date = response.to_whois_dict().get("created_date")
-    if creation_date is None:
-        return {"domain_age_days": None, "domain_age_status": "unknown"}
+        creation_date = response.to_whois_dict().get("created_date")
+        if not isinstance(creation_date, datetime):
+            return dict(UNKNOWN_RESULT)
 
-    # Some registries return a naive datetime (no tzinfo) -- assume UTC
-    # rather than letting the subtraction below raise.
-    if creation_date.tzinfo is None:
-        creation_date = creation_date.replace(tzinfo=timezone.utc)
+        # Some registries return a naive datetime (no tzinfo) -- assume UTC
+        # rather than letting the subtraction below raise.
+        if creation_date.tzinfo is None:
+            creation_date = creation_date.replace(tzinfo=timezone.utc)
 
-    age_days = (datetime.now(timezone.utc) - creation_date).days
+        age_days = (datetime.now(timezone.utc) - creation_date).days
+    except Exception:
+        return dict(UNKNOWN_RESULT)
+
+    # A creation date in the future means the registry gave us something we
+    # can't reason about; don't let it fall into the "new" bucket.
+    if age_days < 0:
+        return dict(UNKNOWN_RESULT)
 
     if age_days < NEW_DOMAIN_THRESHOLD_DAYS:
         status = "new"

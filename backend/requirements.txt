@@ -5,11 +5,19 @@ pydantic
 sqlalchemy
 psycopg2-binary  # Postgres driver for the Neon-hosted DB
 python-dotenv
-tldextract
+# >=5.2 for ExtractResult.top_domain_under_public_suffix, used in features.py
+tldextract>=5.2
 httpx  # async client for the URLhaus threat-intel lookup in /scan
 whodap  # RDAP client for the domain-age signal in /scan
 
-# Needed to load and run the exported model artifact
+# Needed to load and run the exported model artifact.
+#
+# xgboost-cpu, not xgboost: on Linux the regular wheel declares a hard
+# dependency on nvidia-nccl-cu13, which is a 252 MB CUDA wheel. The backend
+# only ever runs single-row CPU inference on an already-trained model, so
+# that's a quarter of a gigabyte of GPU runtime downloaded into every build
+# and never executed. ml/requirements.txt keeps plain xgboost, since
+# training is where a GPU would actually be worth having.
 scikit-learn
-xgboost
+xgboost-cpu
 joblib

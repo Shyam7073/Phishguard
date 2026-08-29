@@ -23,6 +23,12 @@ class ScanRecord(Base):
     domain_age_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     domain_age_status: Mapped[str | None] = mapped_column(String, nullable=True)
     verdict_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    # timezone=True matters: the default below is an *aware* UTC datetime, and
+    # a plain DateTime column silently drops the offset on the way in. Clients
+    # then get an ISO string with no offset, which JavaScript's `new Date()`
+    # parses as local time -- so the dashboard showed every scan shifted by the
+    # viewer's UTC offset. (ScanRecordOut re-attaches UTC on the way out, for
+    # rows already written to the old, offset-less column.)
     scanned_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

@@ -49,7 +49,8 @@ function App() {
             <button
               type="button"
               onClick={loadHistory}
-              className="rounded-md border border-[rgba(11,11,11,0.10)] dark:border-[rgba(255,255,255,0.10)] px-3 py-1.5 text-sm font-medium text-[#0b0b0b] dark:text-white hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+              disabled={!clientId}
+              className="disabled:opacity-40 disabled:cursor-not-allowed rounded-md border border-[rgba(11,11,11,0.10)] dark:border-[rgba(255,255,255,0.10)] px-3 py-1.5 text-sm font-medium text-[#0b0b0b] dark:text-white hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
             >
               Refresh
             </button>

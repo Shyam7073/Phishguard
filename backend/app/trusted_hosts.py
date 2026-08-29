@@ -12,6 +12,16 @@ needed.
 
 import os
 
+from dotenv import load_dotenv
+
+# Explicit rather than inherited: this module reads TRUSTED_HOSTS at import
+# time, and only ever saw the value from `.env` because some *other* module
+# (db.database, threat_intel.urlhaus) happened to be imported first and call
+# load_dotenv(). Reordering imports would have silently emptied the
+# allowlist. load_dotenv() doesn't overwrite variables that are already set,
+# so calling it again here is free.
+load_dotenv()
+
 _DEV_HOSTS = {"localhost", "127.0.0.1"}
 
 

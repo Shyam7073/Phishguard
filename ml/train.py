@@ -2,8 +2,21 @@
 
 Trains Logistic Regression, Random Forest, and XGBoost on the feature
 matrix from ml/features.py, evaluates each on a held-out test set, and
-exports the best-performing model (highest F1) to ml/models/model.joblib
-so the backend can load it and run inference without ever training.
+exports the winner to ml/models/ so the backend can load it and run
+inference without ever training (see export_model for the format).
+
+"Winner" is highest F1, with one tie-break rule (see pick_winner): when two
+models land within F1_TIE_MARGIN of each other, the held-out F1 isn't
+telling them apart, and the pick falls to PREFERRED_MODEL -- the one that
+was checked against real phishing/borderline URLs by hand. That is not a
+hypothetical: the shipped run has Random Forest at 0.9169 and XGBoost at
+0.9164, a gap of 0.0005, while XGBoost has far better real-world recall
+(99.3-100% vs 73.5-93% on the real phishing URLs in Milestone 14) and is
+much less confidently wrong on the residual borderline-legit cases.
+XGBoost is what ships, so the export step has to encode that rule -- until
+it did, re-running this script silently replaced the tested, documented
+model with Random Forest and overwrote the note in MODEL_REPORT.md
+explaining why it shouldn't.
 
 Run with: .venv/bin/python -m ml.train   (must run as a module, from the
 repo root, so `ml` resolves as a package the same way it will for the
@@ -36,6 +49,11 @@ MODELS_DIR = Path(__file__).parent / "models"
 REPORT_PATH = Path(__file__).parent / "MODEL_REPORT.md"
 SEED = 42
 
+# An F1 gap smaller than this is noise on a 26k-row test set, not a real
+# quality difference -- see the module docstring.
+F1_TIE_MARGIN = 0.001
+PREFERRED_MODEL = "XGBoost"
+
 
 def load_data():
     df = pd.read_csv(DATA_PATH)
@@ -60,6 +78,61 @@ def candidate_models():
             n_estimators=200, eval_metric="logloss", random_state=SEED, n_jobs=-1
         ),
     }
+
+
+def pick_winner(results: dict) -> tuple[str, str | None]:
+    """Highest F1, unless the preferred model is within F1_TIE_MARGIN of it.
+
+    Returns (winner_name, tie_break_note); the note is None when the plain
+    F1 ranking decided it, and a sentence for MODEL_REPORT.md when the
+    tie-break did.
+    """
+    ranked = max(results, key=lambda name: results[name]["f1"])
+    if ranked == PREFERRED_MODEL or PREFERRED_MODEL not in results:
+        return ranked, None
+
+    gap = results[ranked]["f1"] - results[PREFERRED_MODEL]["f1"]
+    if gap >= F1_TIE_MARGIN:
+        return ranked, None
+
+    note = (
+        f"{PREFERRED_MODEL} ships despite {ranked} taking the F1 ranking "
+        f"({results[ranked]['f1']:.4f} vs {results[PREFERRED_MODEL]['f1']:.4f}, "
+        f"a gap of {gap:.4f} -- under the {F1_TIE_MARGIN} tie margin). A gap "
+        f"that small doesn't separate the two on held-out data, so the pick "
+        f"falls to the model checked by hand against real phishing and "
+        f"borderline-legit URLs. See PROJECT_PROGRESS.md Milestone 14."
+    )
+    return PREFERRED_MODEL, note
+
+
+def export_model(model) -> Path:
+    """Write the winning model in the most durable format it supports.
+
+    XGBoost gets `save_model` (a versioned UBJSON file) rather than a
+    pickle. XGBoost's own docs are explicit that pickle compatibility is
+    not guaranteed across versions -- and the backend commits this artifact
+    to git while installing an unpinned xgboost at deploy time, so a
+    rebuild that resolves a newer version could stop being able to load it.
+    `save_model`/`load_model` is the format that *is* guaranteed to keep
+    working, and it round-trips the sklearn wrapper's attributes too.
+
+    The other two candidates are plain scikit-learn estimators with no such
+    format, so they still go out as joblib. predictor.py loads whichever of
+    the two is present.
+    """
+    if hasattr(model, "save_model"):
+        path = MODELS_DIR / "model.ubj"
+        model.save_model(path)
+        # Don't leave a stale pickle from a previous run next to the new
+        # artifact -- predictor.py would have two candidates to choose from.
+        (MODELS_DIR / "model.joblib").unlink(missing_ok=True)
+        return path
+
+    path = MODELS_DIR / "model.joblib"
+    joblib.dump(model, path)
+    (MODELS_DIR / "model.ubj").unlink(missing_ok=True)
+    return path
 
 
 def evaluate(model, X_test, y_test):
@@ -87,7 +160,7 @@ def top_features(model, n=8):
     return ranked[:n]
 
 
-def write_report(results, winner_name, winner_features):
+def write_report(results, winner_name, winner_features, tie_break_note=None):
     lines = [
         "# PhishGuard — Model Comparison Report",
         "",
@@ -104,7 +177,10 @@ def write_report(results, winner_name, winner_features):
         )
     lines += [
         "",
-        f"**Winner: {winner_name}** (highest F1 on the held-out test set).",
+        f"**Winner: {winner_name}**"
+        + (
+            f" -- {tie_break_note}" if tie_break_note else " (highest F1 on the held-out test set)."
+        ),
         "",
         f"Confusion matrix `[[TN, FP], [FN, TP]]`: " f"{results[winner_name]['confusion_matrix']}",
         "",
@@ -136,20 +212,25 @@ def main():
             f"f1={metrics['f1']:.4f}"
         )
 
-    winner_name = max(results, key=lambda name: results[name]["f1"])
+    winner_name, tie_break_note = pick_winner(results)
     winner_model = fitted[winner_name]
     print(f"\nWinner: {winner_name} (f1={results[winner_name]['f1']:.4f})")
+    if tie_break_note:
+        print(f"  tie-break: {tie_break_note}")
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    model_path = MODELS_DIR / "model.joblib"
-    joblib.dump(winner_model, model_path)
+    model_path = export_model(winner_model)
     print(f"Saved winning model to {model_path}")
 
     metrics_path = MODELS_DIR / "metrics.json"
-    metrics_path.write_text(json.dumps({"winner": winner_name, "results": results}, indent=2))
+    metrics_path.write_text(
+        json.dumps(
+            {"winner": winner_name, "tie_break": tie_break_note, "results": results}, indent=2
+        )
+    )
 
     winner_features = top_features(winner_model)
-    write_report(results, winner_name, winner_features)
+    write_report(results, winner_name, winner_features, tie_break_note)
     print(f"Wrote comparison report to {REPORT_PATH}")
 
 

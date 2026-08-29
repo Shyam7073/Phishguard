@@ -1,3 +1,5 @@
+import asyncio
+
 import backend.app.api.scan as scan_module
 
 CLIENT_ID = "test-client"
@@ -68,7 +70,10 @@ def test_scan_urlhaus_unknown_falls_back_to_ml_only(client, monkeypatch):
 
 def _fake_predict(phishing_probability: float):
     def _inner(url: str) -> dict:
-        return {"is_phishing": phishing_probability >= 0.5, "phishing_probability": phishing_probability}
+        return {
+            "is_phishing": phishing_probability >= 0.5,
+            "phishing_probability": phishing_probability,
+        }
 
     return _inner
 
@@ -143,9 +148,7 @@ def test_scan_trusted_host_bypasses_model(client, monkeypatch):
     monkeypatch.setattr(scan_module, "check_urlhaus", _async_fail_if_called)
     monkeypatch.setattr(scan_module, "check_domain_age", _async_fail_if_called)
 
-    response = client.post(
-        "/scan", json={"url": "http://localhost:5173/", "client_id": CLIENT_ID}
-    )
+    response = client.post("/scan", json={"url": "http://localhost:5173/", "client_id": CLIENT_ID})
     assert response.status_code == 200
     body = response.json()
     assert body["is_phishing"] is False
@@ -161,3 +164,31 @@ def test_scan_domain_age_unknown_is_noted_in_reason(client):
     response = client.post("/scan", json={"url": "http://google.com", "client_id": CLIENT_ID})
     assert response.status_code == 200
     assert "domain age unavailable" in response.json()["verdict_reason"]
+
+
+def test_scan_runs_threat_intel_lookups_concurrently(client, monkeypatch):
+    # Run one after the other, the two lookups stack their 4s timeouts and a
+    # single slow scan takes 8s+. Rather than time the request (flaky), count
+    # how many lookups are in flight at once: awaited sequentially the peak is
+    # 1, gathered it's 2.
+    state = {"in_flight": 0, "peak": 0}
+
+    async def _tracked(result):
+        state["in_flight"] += 1
+        state["peak"] = max(state["peak"], state["in_flight"])
+        await asyncio.sleep(0.05)
+        state["in_flight"] -= 1
+        return result
+
+    async def _slow_urlhaus(url: str) -> str:
+        return await _tracked("not_listed")
+
+    async def _slow_domain_age(url: str) -> dict:
+        return await _tracked({"domain_age_days": None, "domain_age_status": "unknown"})
+
+    monkeypatch.setattr(scan_module, "check_urlhaus", _slow_urlhaus)
+    monkeypatch.setattr(scan_module, "check_domain_age", _slow_domain_age)
+
+    response = client.post("/scan", json={"url": "http://google.com", "client_id": CLIENT_ID})
+    assert response.status_code == 200
+    assert state["peak"] == 2

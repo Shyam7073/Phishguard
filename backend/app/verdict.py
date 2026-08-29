@@ -52,7 +52,9 @@ def combine_verdict(
     ):
         is_phishing = False
         confidence = RESCUED_VERDICT_CONFIDENCE
-        reason = "ML model flagged this, but the domain is long-established — likely a false positive"
+        reason = (
+            "ML model flagged this, but the domain is long-established — likely a false positive"
+        )
     elif not is_phishing and domain_age_status == "new":
         reason += " (note: domain was registered very recently)"
 

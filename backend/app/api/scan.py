@@ -1,3 +1,4 @@
+import asyncio
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends
@@ -31,9 +32,16 @@ async def scan_url(request: ScanRequest, db: Session = Depends(get_db)) -> ScanR
         urlhaus_status = None
         domain_age = {"domain_age_days": None, "domain_age_status": None}
     else:
-        ml_result = predict(request.url)
-        urlhaus_status = await check_urlhaus(request.url)
-        domain_age = await check_domain_age(request.url)
+        # The three signals are independent, so run them concurrently. Run
+        # sequentially the two lookups stack their 4s timeouts, making a
+        # single slow scan take 8s+; ML inference goes through a thread so
+        # the (synchronous, CPU-bound) model call doesn't block the event
+        # loop while the two HTTP lookups are in flight.
+        ml_result, urlhaus_status, domain_age = await asyncio.gather(
+            asyncio.to_thread(predict, request.url),
+            check_urlhaus(request.url),
+            check_domain_age(request.url),
+        )
         verdict = combine_verdict(
             ml_result["phishing_probability"], urlhaus_status, domain_age["domain_age_status"]
         )

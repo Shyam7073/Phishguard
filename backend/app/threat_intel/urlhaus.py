@@ -17,6 +17,12 @@ the blocklist itself changes often and a stale "not_listed" would be worse
 than a redundant lookup. Still worth it: the same URL routinely gets
 scanned twice in quick succession (background worker + on-demand popup
 scan hitting the same page), which this catches.
+
+A *failed* lookup is cached far more briefly (see FAILURE_CACHE_TTL_SECONDS).
+Caching "unknown" for the full 15 minutes would turn one transient timeout
+into 15 minutes of degraded verdicts for that URL; caching it for a minute
+still absorbs the background-worker/popup double-scan burst, which is the
+only thing the cache is there for.
 """
 
 import os
@@ -31,6 +37,7 @@ load_dotenv()
 URLHAUS_API_URL = "https://urlhaus-api.abuse.ch/v1/url/"
 TIMEOUT_SECONDS = 4.0
 CACHE_TTL_SECONDS = 15 * 60
+FAILURE_CACHE_TTL_SECONDS = 60
 
 _cache = TTLCache(ttl_seconds=CACHE_TTL_SECONDS)
 
@@ -42,7 +49,7 @@ async def check_urlhaus(url: str) -> str:
         return cached
 
     result = await _lookup_urlhaus(url)
-    _cache.set(url, result)
+    _cache.set(url, result, ttl_seconds=FAILURE_CACHE_TTL_SECONDS if result == "unknown" else None)
     return result
 
 
@@ -60,7 +67,22 @@ async def _lookup_urlhaus(url: str) -> str:
             )
             response.raise_for_status()
             body = response.json()
-    except (httpx.HTTPError, ValueError):
+    # Deliberately broad: this signal is best-effort by contract, so *any*
+    # failure here has to degrade to "unknown" rather than 500 a scan that
+    # the ML model could still answer on its own.
+    except Exception:
         return "unknown"
 
-    return "listed" if body.get("query_status") == "ok" else "not_listed"
+    if not isinstance(body, dict):
+        return "unknown"
+
+    query_status = body.get("query_status")
+    if query_status == "ok":
+        return "listed"
+    if query_status == "no_results":
+        return "not_listed"
+    # Anything else ("invalid_url", "http_post_expected", an auth failure
+    # that still came back 200, ...) is URLhaus telling us it did not
+    # answer the question. Reporting that as "not_listed" would turn an
+    # API-side error into positive evidence that a URL is clean.
+    return "unknown"

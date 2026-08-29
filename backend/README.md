@@ -9,7 +9,10 @@ reports. Deployed on Render at `https://phishguard-api-yjr8.onrender.com`
 - `app/api/scan.py` — `POST /scan` (requires `client_id`): checks
   `trusted_hosts.is_trusted_host()` first and short-circuits to a safe
   verdict if matched (skipping ML/URLhaus/RDAP entirely); otherwise runs
-  the full inference pipeline and saves a `ScanRecord`
+  all three signals concurrently (`asyncio.gather`, with ML inference on a
+  thread since it's synchronous) and saves a `ScanRecord`. Concurrency
+  matters here: run one after the other, the two lookups stack their 4s
+  timeouts and one slow scan takes 8s+
 - `app/api/history.py` — `GET /history?client_id=...&limit=` — that
   client's scans only, most recent first
 - `app/api/reports.py` — `GET /reports?client_id=...` — CSV export scoped
@@ -19,8 +22,9 @@ reports. Deployed on Render at `https://phishguard-api-yjr8.onrender.com`
   because free PaaS subdomains and non-HTTPS URLs both structurally
   resemble phishing to the lexical model — see `PROJECT_PROGRESS.md`
   Milestone 15
-- `app/ml_service/predictor.py` — loads `ml/models/model.joblib` once and
-  runs inference (never trains — see `ml/train.py`)
+- `app/ml_service/predictor.py` — loads the model artifact from `ml/models/`
+  once at import (`model.ubj` for XGBoost, `model.joblib` for a scikit-learn
+  winner) and runs inference (never trains — see `ml/train.py`)
 - `app/schemas/scan.py`, `app/schemas/history.py` — Pydantic request/response models
 - `app/db/database.py` — engine/session. Uses Postgres (Neon) via
   `DATABASE_URL` when set — required for deployment, since free hosts like
@@ -28,7 +32,10 @@ reports. Deployed on Render at `https://phishguard-api-yjr8.onrender.com`
   file (`backend/phishguard.db`, gitignored) when `DATABASE_URL` is unset
 - `app/db/models.py` — `ScanRecord` table (id, `client_id` (indexed), url,
   is_phishing, confidence, ml_score, urlhaus_status, domain_age_days,
-  domain_age_status, verdict_reason, scanned_at)
+  domain_age_status, verdict_reason, scanned_at). `scanned_at` is a
+  timezone-aware column; `ScanRecordOut` also re-stamps UTC onto rows written
+  before it was, since an offset-less timestamp gets read as *local* time by
+  the dashboard
 - `tests/` — backend unit/integration tests (`TestClient` against an
   in-memory SQLite DB via `conftest.py`, so tests never touch
   `phishguard.db`/Neon)

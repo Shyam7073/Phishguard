@@ -109,6 +109,7 @@ def _tracking_blob(rng: np.random.Generator) -> str:
         parts.append(f"{rng.choice(_TRACKING_PARAM_NAMES)}={blob}")
     return "&".join(parts)
 
+
 # Path depth in "/"-separated segments, weighted toward shallow (typical
 # browsing) but with a real tail into deep routes -- unlike the old fixed
 # template list, depth 4+ (which is where num_slashes >= 6 lives) is a
@@ -208,6 +209,7 @@ def _random_path(rng: np.random.Generator) -> str:
             query += "&" + _tracking_blob(rng)
         path += query
     return path
+
 
 # Same reasoning as PATH_TEMPLATES: Tranco domains are bare apex domains, so
 # without this every legit URL would have num_subdomains == 0 while ~71% of

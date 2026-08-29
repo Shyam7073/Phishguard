@@ -61,7 +61,9 @@ function DomainAgeBadge({ status, days }) {
 }
 
 function formatTimestamp(value) {
-  return new Date(value).toLocaleString();
+  const parsed = new Date(value);
+  // Invalid Date renders as the literal string "Invalid Date" otherwise.
+  return Number.isNaN(parsed.getTime()) ? "—" : parsed.toLocaleString();
 }
 
 export default function HistoryTable({ records }) {

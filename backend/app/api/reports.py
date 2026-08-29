@@ -1,5 +1,6 @@
 import csv
 import io
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
@@ -12,6 +13,21 @@ from backend.app.db.models import ScanRecord
 router = APIRouter()
 
 
+def _iso_utc(value: datetime | None) -> str:
+    """Render scanned_at as an unambiguous UTC ISO-8601 string.
+
+    Straight str() of the column gives "2026-08-29 12:36:17.211456" with no
+    offset, which is ambiguous in a file meant to be opened somewhere else --
+    and rows written before scanned_at became a timezone-aware column come
+    back naive. Everything is written as UTC, so stamp that on explicitly.
+    """
+    if value is None:
+        return ""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
+
+
 @router.get("/reports")
 def export_reports_csv(
     client_id: str = Query(..., min_length=1), db: Session = Depends(get_db)
@@ -19,7 +35,7 @@ def export_reports_csv(
     records = (
         db.query(ScanRecord)
         .filter(ScanRecord.client_id == client_id)
-        .order_by(desc(ScanRecord.scanned_at))
+        .order_by(desc(ScanRecord.scanned_at), desc(ScanRecord.id))
         .all()
     )
 
@@ -53,7 +69,7 @@ def export_reports_csv(
                 record.domain_age_days,
                 record.domain_age_status,
                 record.verdict_reason,
-                record.scanned_at,
+                _iso_utc(record.scanned_at),
             ]
         )
     buffer.seek(0)

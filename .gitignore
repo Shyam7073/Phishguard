@@ -16,9 +16,13 @@ ml/data/processed/*
 ml/models/*.pkl
 ml/models/*.joblib
 ml/models/*.onnx
+ml/models/*.ubj
 # The trained model IS tracked -- the backend loads it directly at runtime
 # (backend/app/ml_service/predictor.py), so it has to ship in the repo for
 # deployment to work, unlike the raw/processed training data above.
+# model.ubj is XGBoost's own format (the current winner); model.joblib is
+# what ml/train.py writes if a plain scikit-learn model ever wins instead.
+!ml/models/model.ubj
 !ml/models/model.joblib
 
 # --- Node / React ---

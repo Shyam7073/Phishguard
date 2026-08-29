@@ -4,6 +4,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.app.api.history import router as history_router
 from backend.app.api.reports import router as reports_router
 from backend.app.api.scan import router as scan_router
+
+# `models` is imported for its side effect: a model class has to be imported
+# before create_all() to be registered on Base.metadata. The routers pull it
+# in too, but relying on that means an import reorder quietly stops the
+# tables from being created.
+from backend.app.db import models  # noqa: F401  (registers ScanRecord on Base)
 from backend.app.db.database import Base, engine
 
 Base.metadata.create_all(bind=engine)
