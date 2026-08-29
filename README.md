@@ -35,10 +35,7 @@ Then `combine_verdict()` in [backend/app/verdict.py](backend/app/verdict.py)
 merges them, the scan gets written to the database, and it shows up in
 `/history` and `/reports`.
 
-Both network lookups fail soft. Timeout, missing API key, a registry that
-doesn't do RDAP, a malformed response — all of it degrades to `"unknown"`
-and the verdict falls back to whatever's left, with the degradation spelled
-out in the reason text. Neither one can take a scan down.
+### The three signals-
 
 ### The combining rules
 
