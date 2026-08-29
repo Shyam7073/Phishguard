@@ -5,9 +5,9 @@ navigate to, a FastAPI backend combines three independent signals into one
 explainable verdict, and a React dashboard shows the scan history.
 
 The goal isn't just a confidence number, it's a reason behind it. For
-example: "Likely phishing, 99.7% - confirmed malicious, found on the URLhaus
-blocklist." Or: "Looks safe, 65% - ML model flagged this, but the domain is
-long-established, likely a false positive."
+example: "Likely phishing, 99.7% - confirmed malicious, on URLhaus
+blocklist." Or: "Looks safe, 65% - ML flagged it, but the domain is
+long-established."
 
 ## Screenshots
 
@@ -25,8 +25,8 @@ The Chrome extension and the dashboard both talk to one FastAPI backend
 3. An RDAP domain-age lookup
 
 `combine_verdict()` merges the three into one result (is_phishing,
-confidence, reason), and the scan gets saved to SQLite so it shows up in
-`/history` and `/reports`.
+confidence, reason), and the scan gets saved to the database so it shows up
+in `/history` and `/reports`.
 
 ### The three signals
 
@@ -34,7 +34,7 @@ confidence, reason), and the scan gets saved to SQLite so it shows up in
 |---|---|---|
 | ML phishing probability | 17 lexical features of the URL string, XGBoost | Local, no network |
 | Blocklist status | URLhaus (abuse.ch), 15-min cache | 1 HTTP call |
-| Domain age | RDAP via `whodap`, 24-hour cache | 1 HTTP call |
+| Domain age | RDAP via `whodap`, 24-hour cache on success only | 1 HTTP call |
 
 ### How they combine (`backend/app/verdict.py`)
 
@@ -54,6 +54,13 @@ a verdict, but an absence of evidence never inverts one.
 
 Every lookup fails soft: any timeout or error degrades to "unknown" and the
 verdict falls back to ML-only, with the degradation stated in the reason text.
+
+A failed domain-age lookup is deliberately *not* cached. RDAP servers are
+flaky enough that one transient timeout would otherwise suppress the signal
+for the full 24-hour TTL — and that signal is what rescues an established
+domain from a false positive, so a cached failure costs a wrong verdict, not
+just a missing field. URLhaus does cache its `"unknown"`: at a 15-minute TTL,
+throttling a down API is the better trade.
 
 ## The ML model
 
@@ -135,8 +142,7 @@ TRUSTED_HOSTS=                    # optional, comma-separated hostnames that
                                    # skip ML/URLhaus/RDAP entirely (e.g. this
                                    # project's own deployed dashboard, which
                                    # otherwise structurally resembles
-                                   # phishing on free hosting -- see
-                                   # PROJECT_PROGRESS.md Milestone 15).
+                                   # phishing on free hosting).
                                    # localhost/127.0.0.1 are always trusted.
 ```
 
@@ -185,7 +191,7 @@ testing.
 ## Testing
 
 ```bash
-make test    # 27 tests
+make test    # 32 tests
 make lint    # ruff + black --check
 ```
 
@@ -221,7 +227,7 @@ Stated plainly rather than hidden, these are the honest edges of the design:
 - `http://` (not `https://`) is a 100%-confidence false-positive blind spot.
   Training data has zero legitimate `http://` examples, so the model learned
   an absolute rule off zero counterexamples, not a probabilistic one. Known,
-  not retrained by choice — see `PROJECT_PROGRESS.md` Milestone 15.
+  not retrained by choice.
 - Free PaaS subdomains (`*.vercel.app`, `*.onrender.com`, `*.netlify.app`)
   score as phishing regardless of naming — they're structurally identical,
   lexically, to brand-squatting on free hosting. Mitigated for this
@@ -245,6 +251,11 @@ Live, multi-tenant, no Docker:
 | Database | Neon (Postgres) | — |
 | Dashboard (React) | Vercel | `phishguard-gray.vercel.app` |
 
+Opening the dashboard link without the extension installed shows a demo
+scan history instead of an empty page, so the deployed URL is worth visiting
+on its own. Open it from the extension popup's "View my dashboard" link and
+you get your own scans instead.
+
 No login system. Each extension install generates a random `client_id`
 (`crypto.randomUUID()`, stored in `chrome.storage.local`) on first run and
 sends it with every scan; `/history`/`/reports` are filtered by it, so
@@ -252,14 +263,10 @@ multiple people running the extension against the same deployed backend
 each see only their own scan history. This is identification, not
 authentication — clearing extension storage or reinstalling generates a new
 `client_id` and orphans the old history, an accepted trade-off at this
-scale. See `PROJECT_PROGRESS.md` Milestone 15 for the full design rationale,
-including two real false-positive classes found while deploying (`http://`
-scheme, free-PaaS-subdomain shape) and why they were mitigated instead of
-retrained.
+scale. Deploying surfaced two real false-positive classes (the `http://`
+scheme and the free-PaaS-subdomain shape, both in Known limitations above);
+each was mitigated deliberately rather than retrained away.
 
 ## Status
 
-All 15 milestones complete, deployed and live (see above). See `TODO.md`
-for the task-level breakdown and `PROJECT_PROGRESS.md` for the full
-per-milestone engineering log, including every false-positive investigation
-and the reasoning behind each design call.
+All 15 milestones complete, deployed and live (see above).

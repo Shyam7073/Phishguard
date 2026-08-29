@@ -1,15 +1,14 @@
 """Domain-registration-age lookup via RDAP -- the modern, JSON-based
-successor to WHOIS (see PROJECT_PROGRESS.md for why RDAP was picked over
-parsing raw WHOIS text). Targets the ceiling of the lexical-only ML model
-documented in Milestone 8: an old, established domain like `github.com`
+successor to WHOIS, picked over parsing raw WHOIS text. Targets the ceiling
+of the lexical-only ML model: an old, established domain like `github.com`
 serving an unusual-looking path shouldn't be judged the same way as a
 lookalike domain registered last week.
 
 Same best-effort contract as urlhaus.py: a domain not found, an unsupported
-TLD (RDAP coverage isn't universal -- see PROJECT_PROGRESS.md), a timeout, or
+TLD (RDAP coverage isn't universal), a timeout, or
 any network error all fall back to "unknown" rather than blocking /scan.
 
-**Snag hit and fixed during Milestone 13**: `whodap.aio_lookup_domain()`
+**Snag hit and fixed in live testing**: `whodap.aio_lookup_domain()`
 creates a fresh `DNSClient` and re-fetches IANA's RDAP bootstrap registry
 (a second network round trip) on every single call -- against real domains
 this occasionally pushed a single lookup past a 4s timeout outright (timed
@@ -22,7 +21,8 @@ Results are also cached for 24 hours, keyed by registrable domain (not the
 full URL -- age is a property of the domain, so every path on the same
 domain shares one entry). Long TTL is safe here: a domain's creation date
 never changes, and its age bucket only matters near the 30/365-day
-boundaries.
+boundaries. Failed lookups are deliberately *not* cached -- see
+check_domain_age below.
 """
 
 import asyncio
@@ -71,7 +71,14 @@ async def check_domain_age(url: str) -> dict:
         return cached
 
     result = await _lookup_domain_age(extracted.domain, extracted.suffix)
-    _cache.set(cache_key, result)
+    # Only cache a real answer. Caching "unknown" would let one transient
+    # timeout blind the domain-age signal for a full 24 hours -- and this
+    # signal is exactly what rescues established domains from a false
+    # positive, so a cached failure costs a wrong verdict, not just a
+    # missing field. (urlhaus.py caches its "unknown" on purpose: its TTL
+    # is 15 minutes, short enough that throttling a down API wins.)
+    if result["domain_age_status"] != "unknown":
+        _cache.set(cache_key, result)
     return result
 
 

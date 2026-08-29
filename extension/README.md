@@ -11,8 +11,7 @@ Chrome extension (Manifest V3).
 - `client-id.js` — generates a random `client_id` (`crypto.randomUUID()`)
   on first run and persists it in `chrome.storage.local`; every install
   gets its own ID, sent with every scan so the backend can keep each
-  friend's history separate (see Milestone 15 in `PROJECT_PROGRESS.md`).
-  Shared into `background.js` via `importScripts()` and into `popup.html`
+  friend's history separate. Shared into `background.js` via `importScripts()` and into `popup.html`
   via a `<script>` tag — not a login, just identification; reinstalling or
   clearing extension storage generates a new ID and orphans the old
   history.

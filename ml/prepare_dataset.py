@@ -99,7 +99,7 @@ def _tracking_blob(rng: np.random.Generator) -> str:
     leaving the model still ~95% confident on a real reported false
     positive even after adding one blob. Found via a real user report (a
     real Google search URL scored 99.9996% phishing, then still ~95% after
-    a first, single-param-only fix) -- see PROJECT_PROGRESS.md.
+    a first, single-param-only fix).
     """
     num_params = rng.integers(1, 4)
     parts = []
@@ -123,7 +123,7 @@ def _tracking_blob(rng: np.random.Generator) -> str:
 # realistic share instead of an arbitrary "mostly deep paths" assumption.
 # Found via a real user report (a genuine site scored 72% phishing on
 # nothing but "https://.../" ), not synthetic testing -- see
-# PROJECT_PROGRESS.md.
+# the by-class coverage audit.
 _DEPTH0_WEIGHT = 0.20
 _DEPTH_TAIL_SHAPE = [0.28, 0.27, 0.17, 0.10, 0.06, 0.03, 0.01]
 _tail_scale = (1 - _DEPTH0_WEIGHT) / sum(_DEPTH_TAIL_SHAPE)
@@ -155,7 +155,7 @@ def _random_segment(rng: np.random.Generator) -> str:
         # real digit-heavy legit URL (a GitHub commit link, a session
         # token) was misread as phishing on that one feature alone. Found
         # via a real user report (`github.com/.../commit/<sha>` scored
-        # 98.9% phishing) -- see PROJECT_PROGRESS.md.
+        # 98.9% phishing).
         length = rng.integers(6, 41)
         return "".join(rng.choice(_HEX_ALPHABET, size=length))
     if roll < 0.85:
@@ -186,7 +186,7 @@ def _random_path(rng: np.random.Generator) -> str:
         # time. That mismatch alone was enough to flip a real, legitimate
         # bare-domain page (e.g. "https://example.com/") from ~7% to ~72%
         # phishing on a single trailing slash. Found via a real user report,
-        # not synthetic testing -- see PROJECT_PROGRESS.md.
+        # not synthetic testing.
         path = rng.choice(["", "/"], p=[0.05, 0.95])
     else:
         segments = [_random_segment(rng) for _ in range(depth)]

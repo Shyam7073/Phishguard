@@ -1,7 +1,7 @@
 """Live blocklist lookup against abuse.ch's URLhaus.
 
 Picked over VirusTotal (free tier is rate-limited too tightly for a "scan
-every page browsed" use case) -- see PROJECT_PROGRESS.md for the comparison.
+every page browsed" use case).
 abuse.ch added a required `Auth-Key` header across their APIs after that
 comparison was made; the key is still free (sign up at auth.abuse.ch) and is
 read from the `URLHAUS_AUTH_KEY` env var via `.env` (gitignored, never

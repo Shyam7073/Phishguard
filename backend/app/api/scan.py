@@ -1,10 +1,11 @@
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.app.db.database import get_db
 from backend.app.db.models import ScanRecord
+from backend.app.demo import DEMO_CLIENT_ID
 from backend.app.ml_service.predictor import predict
 from backend.app.schemas.scan import ScanRequest, ScanResponse
 from backend.app.threat_intel.domain_age import check_domain_age
@@ -23,6 +24,11 @@ TRUSTED_HOST_VERDICT = {
 
 @router.post("/scan", response_model=ScanResponse)
 async def scan_url(request: ScanRequest, db: Session = Depends(get_db)) -> ScanResponse:
+    # The demo history is a fixed, seeded showcase for anyone opening the
+    # dashboard without the extension -- real traffic must not append to it.
+    if request.client_id == DEMO_CLIENT_ID:
+        raise HTTPException(status_code=403, detail=f"'{DEMO_CLIENT_ID}' is a reserved client_id")
+
     hostname = urlparse(request.url).hostname
 
     if is_trusted_host(hostname):

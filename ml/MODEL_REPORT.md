@@ -15,7 +15,7 @@ automatic pick: XGBoost has far stronger real-world phishing recall
 (99.3-100% vs RF's 73.5-93% on 5 real phishing test URLs) and better
 calibration on the residual borderline-legit cases
 (`twitter.com/anthropicai`: XGBoost 71.4% vs RF's 95.4%, both wrong but
-XGBoost far less confidently so). See PROJECT_PROGRESS.md Milestone 14.
+XGBoost far less confidently so).
 
 Confusion matrix `[[TN, FP], [FN, TP]]`: [[12126, 874], [1266, 11734]]
 

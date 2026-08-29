@@ -7,8 +7,8 @@ URL, not a guess) -- checked first, same as before. Otherwise the verdict
 follows the ML score, with one addition: an old, established domain (>=365
 days, per RDAP) overrides a *borderline* ML phishing call (not an
 overwhelming one -- see NEW_DOMAIN_THRESHOLD note below) to legitimate.
-This directly targets the residual false positives documented in
-PROJECT_PROGRESS.md (`github.com/anthropics`, `twitter.com/anthropicai`):
+This directly targets the residual false positives found in live testing
+(`github.com/anthropics`, `twitter.com/anthropicai`):
 a lexical-only model has no way to know a domain is long-established, so
 this is exactly the missing evidence.
 
@@ -38,7 +38,7 @@ def combine_verdict(
         return {
             "is_phishing": True,
             "confidence": max(phishing_probability, 0.99),
-            "verdict_reason": "Confirmed malicious — found on the URLhaus blocklist",
+            "verdict_reason": "Confirmed malicious — on URLhaus blocklist",
         }
 
     is_phishing = phishing_probability >= 0.5
@@ -52,13 +52,13 @@ def combine_verdict(
     ):
         is_phishing = False
         confidence = RESCUED_VERDICT_CONFIDENCE
-        reason = "ML model flagged this, but the domain is long-established — likely a false positive"
+        reason = "ML flagged it, but the domain is long-established"
     elif not is_phishing and domain_age_status == "new":
-        reason += " (note: domain was registered very recently)"
+        reason += " (domain registered recently)"
 
     if urlhaus_status == "unknown":
-        reason += " (URLhaus check unavailable)"
+        reason += " (blocklist unavailable)"
     if domain_age_status == "unknown":
-        reason += " (domain age unavailable)"
+        reason += " (domain age unknown)"
 
     return {"is_phishing": is_phishing, "confidence": confidence, "verdict_reason": reason}

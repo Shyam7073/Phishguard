@@ -1,0 +1,122 @@
+[
+  {
+    "id": 1,
+    "url": "https://www.google.com/search?q=phishing+detection",
+    "is_phishing": false,
+    "confidence": 0.908213272690773,
+    "ml_score": 0.09178672730922699,
+    "urlhaus_status": "not_listed",
+    "domain_age_days": 10575,
+    "domain_age_status": "established",
+    "verdict_reason": "Looks safe",
+    "scanned_at": "2026-08-29T14:05:11.482913"
+  },
+  {
+    "id": 2,
+    "url": "https://bit.ly/3xR9kQm",
+    "is_phishing": true,
+    "confidence": 0.9999,
+    "ml_score": 0.9999,
+    "urlhaus_status": "not_listed",
+    "domain_age_days": 6677,
+    "domain_age_status": "established",
+    "verdict_reason": "Flagged as phishing by the ML model",
+    "scanned_at": "2026-08-29T13:12:44.907331"
+  },
+  {
+    "id": 3,
+    "url": "https://github.com/anthropics",
+    "is_phishing": false,
+    "confidence": 0.65,
+    "ml_score": 0.7765345573425293,
+    "urlhaus_status": "not_listed",
+    "domain_age_days": 6898,
+    "domain_age_status": "established",
+    "verdict_reason": "ML flagged it, but the domain is long-established",
+    "scanned_at": "2026-08-29T11:42:39.104772"
+  },
+  {
+    "id": 4,
+    "url": "https://drive.google.com/uc?export=download&id=1pxZ86u3QanfKU3WPmIdLZ9Bf6lWvnKjB",
+    "is_phishing": true,
+    "confidence": 0.99,
+    "ml_score": 0.6558,
+    "urlhaus_status": "listed",
+    "domain_age_days": 10575,
+    "domain_age_status": "established",
+    "verdict_reason": "Confirmed malicious — on URLhaus blocklist",
+    "scanned_at": "2026-08-29T09:15:02.771640"
+  },
+  {
+    "id": 5,
+    "url": "http://192.168.0.1/login/verify-account.php",
+    "is_phishing": true,
+    "confidence": 1.0,
+    "ml_score": 1.0,
+    "urlhaus_status": "not_listed",
+    "domain_age_days": null,
+    "domain_age_status": "unknown",
+    "verdict_reason": "Flagged as phishing by the ML model (domain age unknown)",
+    "scanned_at": "2026-08-29T07:38:19.552104"
+  },
+  {
+    "id": 6,
+    "url": "https://mail.google.com/mail/u/0/",
+    "is_phishing": false,
+    "confidence": 0.848398894071579,
+    "ml_score": 0.15160110592842102,
+    "urlhaus_status": "not_listed",
+    "domain_age_days": 10575,
+    "domain_age_status": "established",
+    "verdict_reason": "Looks safe",
+    "scanned_at": "2026-08-28T22:30:57.336218"
+  },
+  {
+    "id": 7,
+    "url": "https://gd.ozzhlb.net/bin/stego_pefqx5myie.png",
+    "is_phishing": true,
+    "confidence": 0.99,
+    "ml_score": 0.8412,
+    "urlhaus_status": "listed",
+    "domain_age_days": 98,
+    "domain_age_status": "moderate",
+    "verdict_reason": "Confirmed malicious — on URLhaus blocklist",
+    "scanned_at": "2026-08-28T20:11:35.774620"
+  },
+  {
+    "id": 8,
+    "url": "https://netflix-billing-update.online/account/verify/payment.php",
+    "is_phishing": true,
+    "confidence": 0.9007,
+    "ml_score": 0.9007,
+    "urlhaus_status": "not_listed",
+    "domain_age_days": null,
+    "domain_age_status": "unknown",
+    "verdict_reason": "Flagged as phishing by the ML model (domain age unknown)",
+    "scanned_at": "2026-08-28T18:04:23.915604"
+  },
+  {
+    "id": 9,
+    "url": "https://smarthomy.cl/svchost/64bitxxblessings.exe",
+    "is_phishing": true,
+    "confidence": 0.99,
+    "ml_score": 0.7936,
+    "urlhaus_status": "listed",
+    "domain_age_days": null,
+    "domain_age_status": "unknown",
+    "verdict_reason": "Confirmed malicious — on URLhaus blocklist",
+    "scanned_at": "2026-08-28T14:20:48.229103"
+  },
+  {
+    "id": 10,
+    "url": "https://twitter.com/anthropicai",
+    "is_phishing": false,
+    "confidence": 0.65,
+    "ml_score": 0.7143375873565674,
+    "urlhaus_status": "not_listed",
+    "domain_age_days": 9717,
+    "domain_age_status": "established",
+    "verdict_reason": "ML flagged it, but the domain is long-established",
+    "scanned_at": "2026-08-28T10:58:16.640281"
+  }
+]

@@ -30,6 +30,13 @@ dashboard/build/
 *.sqlite3
 *.db
 
+# --- Personal revision notes (never publish) ---
+# Study/revision material for this project, not part of the project itself.
+preparation/
+INTERVIEW_PREP.md
+PROJECT_PROGRESS.md
+TODO.md
+
 # --- Editors / OS ---
 .vscode/
 .idea/

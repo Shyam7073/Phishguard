@@ -17,8 +17,7 @@ reports. Deployed on Render at `https://phishguard-api-yjr8.onrender.com`
 - `app/trusted_hosts.py` — `TRUSTED_HOSTS` env var allowlist (comma-
   separated hostnames); always trusts `localhost`/`127.0.0.1`. Exists
   because free PaaS subdomains and non-HTTPS URLs both structurally
-  resemble phishing to the lexical model — see `PROJECT_PROGRESS.md`
-  Milestone 15
+  resemble phishing to the lexical model
 - `app/ml_service/predictor.py` — loads `ml/models/model.joblib` once and
   runs inference (never trains — see `ml/train.py`)
 - `app/schemas/scan.py`, `app/schemas/history.py` — Pydantic request/response models
