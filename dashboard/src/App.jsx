@@ -1,13 +1,15 @@
 import { useEffect, useState, useCallback } from "react";
-import { API_BASE_URL, fetchHistory, resolveClient } from "./api";
+import { API_BASE_URL, fetchHistory, persistClientId, resolveClient, scanUrl } from "./api";
 import demoData from "./demoData.json";
 import StatTiles from "./components/StatTiles";
 import VerdictBarChart from "./components/VerdictBarChart";
 import HistoryTable from "./components/HistoryTable";
 import ExportButton from "./components/ExportButton";
+import UrlChecker from "./components/UrlChecker";
 
 function App() {
-  const [{ clientId, isDemo }] = useState(resolveClient);
+  const [client, setClient] = useState(resolveClient);
+  const { clientId, isDemo } = client;
   // The demo history is a fixed, checked-in fixture (demoData.json) rather
   // than a live query: it renders on first paint with no backend involved,
   // which matters because the API sits on a free tier that spins down when
@@ -42,6 +44,27 @@ function App() {
     loadHistory();
   }, [loadHistory]);
 
+  // A demo visitor has no client_id of their own ("demo" is reserved and
+  // /scan refuses to write under it) -- their first manual check mints a
+  // real one and graduates them out of demo mode, same as installing the
+  // extension would. The scan itself only ever inspects the URL string, so
+  // nothing here ever opens or fetches the pasted page.
+  const handleCheckUrl = useCallback(
+    async (url) => {
+      const targetClientId = isDemo ? crypto.randomUUID() : clientId;
+      const verdict = await scanUrl(url, targetClientId);
+      if (isDemo) {
+        persistClientId(targetClientId);
+        setClient({ clientId: targetClientId, isDemo: false });
+      }
+      fetchHistory(targetClientId, 100)
+        .then(setRecords)
+        .catch(() => {}); // best-effort refresh -- the inline result already rendered
+      return verdict;
+    },
+    [clientId, isDemo]
+  );
+
   const total = records.length;
   const phishingCount = records.filter((r) => r.is_phishing).length;
   const legitCount = total - phishingCount;
@@ -69,6 +92,8 @@ function App() {
             <ExportButton clientId={clientId} records={records} isDemo={isDemo} />
           </div>
         </header>
+
+        <UrlChecker onCheck={handleCheckUrl} />
 
         {isDemo && (
           <div className="rounded-lg border border-[#2a78d6]/30 bg-[#2a78d6]/10 px-4 py-3 text-sm text-[#0b0b0b] dark:text-white">
