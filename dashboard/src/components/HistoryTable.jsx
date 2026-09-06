@@ -8,7 +8,8 @@ export default function HistoryTable({ records }) {
   if (records.length === 0) {
     return (
       <div className="rounded-lg border border-[rgba(11,11,11,0.10)] dark:border-[rgba(255,255,255,0.10)] bg-[#fcfcfb] dark:bg-[#1a1a19] px-4 py-8 text-center text-sm text-[#898781]">
-        No scans yet — browse to a site with the PhishGuard extension installed.
+        No scans yet — check a URL above, or install the PhishGuard extension
+        to have every site you visit scanned automatically.
       </div>
     );
   }

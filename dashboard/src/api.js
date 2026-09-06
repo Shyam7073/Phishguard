@@ -9,25 +9,18 @@ export const API_BASE_URL =
 
 const CLIENT_ID_STORAGE_KEY = "phishguard_client_id";
 
-// Reserved id whose history is seeded by backend/scripts/seed_demo.py.
-export const DEMO_CLIENT_ID = "demo";
-
 // The dashboard has no login -- it trusts a client_id, either passed in the
 // URL (the extension popup's "View my dashboard" link) or previously saved
 // from an earlier visit. Someone opening the deployed link without the
-// extension installed has neither, so they fall through to the seeded demo
-// history rather than an empty page.
-export function resolveClient() {
+// extension has neither and gets null: an empty history plus the URL
+// checker, which mints them an id on their first check.
+export function resolveClientId() {
   const fromUrl = new URLSearchParams(window.location.search).get("client_id");
   if (fromUrl) {
     localStorage.setItem(CLIENT_ID_STORAGE_KEY, fromUrl);
-    return { clientId: fromUrl, isDemo: fromUrl === DEMO_CLIENT_ID };
+    return fromUrl;
   }
-  const stored = localStorage.getItem(CLIENT_ID_STORAGE_KEY);
-  if (stored) {
-    return { clientId: stored, isDemo: stored === DEMO_CLIENT_ID };
-  }
-  return { clientId: DEMO_CLIENT_ID, isDemo: true };
+  return localStorage.getItem(CLIENT_ID_STORAGE_KEY);
 }
 
 export async function fetchHistory(clientId, limit = 100) {
@@ -61,9 +54,9 @@ export async function scanUrl(url, clientId) {
   return response.json();
 }
 
-// Persists a client_id the same way resolveClient() reads one back, used
-// when a demo visitor runs their first manual check and "graduates" into
-// their own (still anonymous, identification-only) history.
+// Persists a client_id the same way resolveClientId() reads one back, used
+// when a first-time visitor's manual check mints one for them (still
+// anonymous -- identification, not authentication).
 export function persistClientId(clientId) {
   localStorage.setItem(CLIENT_ID_STORAGE_KEY, clientId);
 }

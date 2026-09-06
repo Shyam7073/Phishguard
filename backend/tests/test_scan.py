@@ -162,11 +162,3 @@ def test_scan_domain_age_unknown_is_noted_in_reason(client):
     response = client.post("/scan", json={"url": "http://google.com", "client_id": CLIENT_ID})
     assert response.status_code == 200
     assert "domain age unknown" in response.json()["verdict_reason"]
-
-
-def test_scan_rejects_reserved_demo_client_id(client):
-    """The seeded demo history is a fixed showcase for the deployed
-    dashboard -- live traffic must not be able to append rows to it."""
-    response = client.post("/scan", json={"url": "https://example.com", "client_id": "demo"})
-
-    assert response.status_code == 403

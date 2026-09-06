@@ -197,7 +197,7 @@ testing.
 ## Testing
 
 ```bash
-make test    # 32 tests
+make test    # 31 tests
 make lint    # ruff + black --check
 ```
 
@@ -257,10 +257,13 @@ Live, multi-tenant, no Docker:
 | Database | Neon (Postgres) | — |
 | Dashboard (React) | Vercel | `phishguard-gray.vercel.app` |
 
-Opening the dashboard link without the extension installed shows a demo
-scan history instead of an empty page, so the deployed URL is worth visiting
-on its own. Open it from the extension popup's "View my dashboard" link and
-you get your own scans instead.
+Opening the dashboard link without the extension installed gives you an
+empty history plus the "Check a URL" box, so the deployed URL is worth
+visiting on its own: paste any link and you get the same verdict the
+extension would return, and that first check mints a `client_id` your
+results accumulate under. Open the dashboard from the extension popup's
+"View my dashboard" link instead and it shows the scans the extension has
+already recorded.
 
 No login system. Each extension install generates a random `client_id`
 (`crypto.randomUUID()`, stored in `chrome.storage.local`) on first run and

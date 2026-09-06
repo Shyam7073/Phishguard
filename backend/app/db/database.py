@@ -7,12 +7,12 @@ file for offline dev when DATABASE_URL isn't set.
 
 Guard against developing against the live database
 --------------------------------------------------
-DATABASE_URL lives in `.env` on the dev machine (it is needed there to run
-`seed_demo.py --deployed`), and `.env` is gitignored so it never ships. That
-combination used to make `uvicorn` on localhost silently write real rows into
-the deployed Neon database: `load_dotenv()` picks the URL up, and nothing
-distinguished "I am the deployment" from "I am a laptop that happens to hold
-the deployment's credential".
+DATABASE_URL lives in `.env` on the dev machine (so the deployed database can
+be inspected or maintained from here), and `.env` is gitignored so it never
+ships. That combination used to make `uvicorn` on localhost silently write
+real rows into the deployed Neon database: `load_dotenv()` picks the URL up,
+and nothing distinguished "I am the deployment" from "I am a laptop that
+happens to hold the deployment's credential".
 
 The distinguishing fact is the `.env` file itself. It exists only on a dev
 machine; the deployment gets DATABASE_URL from Render's own environment and
@@ -20,8 +20,7 @@ has no `.env` at all. So a remote URL that arrives while a `.env` file is
 present is treated as a dev machine holding a production credential, and the
 engine falls back to local SQLite instead of honouring it. Opt back in with
 PHISHGUARD_DEPLOYED=1 when writing to the deployed database is the actual
-intent -- the same explicit-confirmation rule `seed_demo.py` already applies
-via its `--deployed` flag.
+intent.
 
 Nothing here requires configuration on Render: with no `.env` in the
 deployment, the guard never engages.
