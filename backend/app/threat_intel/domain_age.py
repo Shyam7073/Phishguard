@@ -26,15 +26,33 @@ check_domain_age below.
 """
 
 import asyncio
+import os
 from datetime import datetime, timezone
 
 import httpx
 import tldextract
 import whodap
+from dotenv import load_dotenv
 
 from backend.app.threat_intel.cache import TTLCache
 
-TIMEOUT_SECONDS = 4.0
+load_dotenv()
+
+# 4s is a deliberate serving budget, not a guess: /scan runs on every page
+# navigation, so a slow registry must not hold a verdict hostage -- the
+# lookup degrades to "unknown" and the verdict falls back to ML instead.
+#
+# It is env-tunable because that budget is not reachable on every network.
+# RDAP latency off a home connection is wildly variable rather than merely
+# high: the same five domains measured 0.70-2.57s on one run and 2.25-9.53s
+# on the next, and the first lookup in a fresh process additionally pays the
+# one-time IANA bootstrap fetch. At 4s that intermittently degrades domain
+# age to "unknown", which silently disables the established-domain rescue in
+# verdict.py -- the branch you most want to exercise while developing, since
+# it is what separates a false positive from a correct verdict. Raise it via
+# RDAP_TIMEOUT_SECONDS in .env for local work; deployment keeps the 4s
+# default unless it is set there too.
+TIMEOUT_SECONDS = float(os.environ.get("RDAP_TIMEOUT_SECONDS", "4.0"))
 NEW_DOMAIN_THRESHOLD_DAYS = 30
 ESTABLISHED_DOMAIN_THRESHOLD_DAYS = 365
 CACHE_TTL_SECONDS = 24 * 60 * 60
