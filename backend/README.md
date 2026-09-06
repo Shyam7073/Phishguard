@@ -24,7 +24,17 @@ reports. Deployed on Render at `https://phishguard-api-yjr8.onrender.com`
 - `app/db/database.py` — engine/session. Uses Postgres (Neon) via
   `DATABASE_URL` when set — required for deployment, since free hosts like
   Render wipe local disk on every restart. Falls back to a local SQLite
-  file (`backend/phishguard.db`, gitignored) when `DATABASE_URL` is unset
+  file (`backend/phishguard.db`, gitignored) when `DATABASE_URL` is unset.
+  **Dev-machine guard:** `DATABASE_URL` also lives in the local `.env` (it
+  is needed to run `seed_demo.py --deployed`), which used to mean running
+  `uvicorn` locally wrote real rows into the deployed Neon database. A
+  remote `DATABASE_URL` seen while a `.env` file is present is now treated
+  as a dev machine holding a production credential, and SQLite is used
+  instead with a warning on stdout. The deployment has no `.env` — Render
+  supplies `DATABASE_URL` through its own environment — so the guard never
+  engages there and no Render configuration is needed. Override on a dev
+  machine with `PHISHGUARD_DEPLOYED=1` when writing to the deployed
+  database is genuinely the intent
 - `app/db/models.py` — `ScanRecord` table (id, `client_id` (indexed), url,
   is_phishing, confidence, ml_score, urlhaus_status, domain_age_days,
   domain_age_status, verdict_reason, scanned_at)

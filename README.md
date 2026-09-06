@@ -18,11 +18,17 @@ long-established."
 ## How it works
 
 The Chrome extension and the dashboard both talk to one FastAPI backend
-(`POST /scan`). For each URL, the backend runs three checks in parallel:
+(`POST /scan`). For each URL, the backend runs three checks:
 
 1. ML inference on 17 lexical features of the URL string (XGBoost)
 2. A URLhaus blocklist lookup
 3. An RDAP domain-age lookup
+
+The ML step is local and instant. The two network lookups hit unrelated
+services and neither feeds the other, so they run concurrently via
+`asyncio.gather` — the network cost of a scan is the slower of the two, not
+their sum. Either one degrades to `"unknown"` on timeout or error rather than
+failing the scan, in which case the verdict falls back to the ML score.
 
 `combine_verdict()` merges the three into one result (is_phishing,
 confidence, reason), and the scan gets saved to the database so it shows up

@@ -19,8 +19,11 @@ fixture.
 Run against local SQLite (safe, what you want for regenerating the snapshot):
     DATABASE_URL="" .venv/bin/python -m backend.scripts.seed_demo
 
-Run against the deployed Neon database (DATABASE_URL from .env):
-    .venv/bin/python -m backend.scripts.seed_demo --deployed
+Run against the deployed Neon database (DATABASE_URL from .env). Both the
+env var and the flag are required: database.py withholds the deployed
+database from a dev machine unless PHISHGUARD_DEPLOYED is set, and this
+script additionally refuses to touch it without --deployed.
+    PHISHGUARD_DEPLOYED=1 .venv/bin/python -m backend.scripts.seed_demo --deployed
 """
 
 import argparse
@@ -162,6 +165,15 @@ def main() -> None:
             f"DATABASE_URL points at {engine.url.get_backend_name()} "
             f"({engine.url.host}) -- pass --deployed to seed it, or run with "
             'DATABASE_URL="" to seed a local SQLite file instead.'
+        )
+    if is_sqlite and args.deployed:
+        # Without this, the dev-machine guard in database.py would hand back a
+        # SQLite engine and --deployed would quietly seed the wrong database.
+        parser.error(
+            "--deployed was passed but the engine resolved to local SQLite. "
+            "The dev-machine guard in backend/app/db/database.py withholds the "
+            "deployed database unless you opt in explicitly -- re-run as:\n"
+            "    PHISHGUARD_DEPLOYED=1 .venv/bin/python -m backend.scripts.seed_demo --deployed"
         )
 
     print(f"Seeding '{DEMO_CLIENT_ID}' history into {engine.url.get_backend_name()}...")

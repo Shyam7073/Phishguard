@@ -68,7 +68,10 @@ def test_scan_urlhaus_unknown_falls_back_to_ml_only(client, monkeypatch):
 
 def _fake_predict(phishing_probability: float):
     def _inner(url: str) -> dict:
-        return {"is_phishing": phishing_probability >= 0.5, "phishing_probability": phishing_probability}
+        return {
+            "is_phishing": phishing_probability >= 0.5,
+            "phishing_probability": phishing_probability,
+        }
 
     return _inner
 
@@ -143,9 +146,7 @@ def test_scan_trusted_host_bypasses_model(client, monkeypatch):
     monkeypatch.setattr(scan_module, "check_urlhaus", _async_fail_if_called)
     monkeypatch.setattr(scan_module, "check_domain_age", _async_fail_if_called)
 
-    response = client.post(
-        "/scan", json={"url": "http://localhost:5173/", "client_id": CLIENT_ID}
-    )
+    response = client.post("/scan", json={"url": "http://localhost:5173/", "client_id": CLIENT_ID})
     assert response.status_code == 200
     body = response.json()
     assert body["is_phishing"] is False

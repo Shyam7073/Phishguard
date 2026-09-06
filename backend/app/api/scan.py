@@ -1,3 +1,4 @@
+import asyncio
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -38,8 +39,16 @@ async def scan_url(request: ScanRequest, db: Session = Depends(get_db)) -> ScanR
         domain_age = {"domain_age_days": None, "domain_age_status": None}
     else:
         ml_result = predict(request.url)
-        urlhaus_status = await check_urlhaus(request.url)
-        domain_age = await check_domain_age(request.url)
+        # The two lookups hit unrelated services and neither feeds the other,
+        # so they run concurrently: /scan's network cost is the slower of the
+        # two rather than their sum, which matters because the extension calls
+        # this on every navigation. Both already degrade to "unknown"
+        # internally on timeout/error, so neither can fail the gather -- a
+        # dead lookup just drops the verdict back to ML alone.
+        urlhaus_status, domain_age = await asyncio.gather(
+            check_urlhaus(request.url),
+            check_domain_age(request.url),
+        )
         verdict = combine_verdict(
             ml_result["phishing_probability"], urlhaus_status, domain_age["domain_age_status"]
         )

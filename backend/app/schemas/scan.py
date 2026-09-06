@@ -11,7 +11,10 @@ class ScanResponse(BaseModel):
     is_phishing: bool
     confidence: float
     ml_score: float | None = Field(
-        ..., description="Raw phishing probability from the ML model, or null if not run (e.g. trusted host)"
+        ...,
+        description=(
+            "Raw phishing probability from the ML model, or null if not run (e.g. trusted host)"
+        ),
     )
     urlhaus_status: str | None = Field(
         ..., description="'listed', 'not_listed', 'unknown', or null if not checked"
